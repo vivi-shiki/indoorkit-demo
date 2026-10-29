@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const DEMO = 'https://vivi-shiki.github.io/IndoorKit/';
+const DEMO = 'https://vivi-shiki.github.io/indoorkit-demo/';
 const READMES = [
   { file: 'README.md', lang: 'en' },
   { file: 'README.zh-CN.md', lang: 'zh' },
@@ -10,7 +10,7 @@ const READMES = [
 
 const read = (file: string) => readFileSync(new URL(`../../../${file}`, import.meta.url), 'utf8');
 const demoLinks = (text: string) =>
-  text.match(/https:\/\/vivi-shiki\.github\.io\/IndoorKit\/[^\s>)\]]*/g) ?? [];
+  text.match(/https:\/\/vivi-shiki\.github\.io\/indoorkit-demo\/[^\s>)\]]*/g) ?? [];
 
 describe('README demo links', () => {
   for (const { file, lang } of READMES) {
@@ -20,7 +20,7 @@ describe('README demo links', () => {
     });
 
     it(`${file} no longer lists the four page links`, () => {
-      expect(read(file)).not.toMatch(/IndoorKit\/[^\s]*#\/(tracking|assets|alerts|occupancy)/);
+      expect(read(file)).not.toMatch(/indoorkit-demo\/[^\s]*#\/(tracking|assets|alerts|occupancy)/);
     });
   }
 });

@@ -4,9 +4,9 @@ import { describe, expect, it } from 'vitest';
 
 /**
  * 四层边界（docs/adr/0002-sdk-and-domain-layers.md）：
- * 地图引擎 maplibre-gl 只由 core 封装；SDK（packages/*）不认识任何业务；
- * 医院业务（domains/hospital）不碰地图和 DOM；页面只用 SDK 的公开接口。
- * React 只出现在应用里：SDK 和业务层是不依赖框架的 TypeScript。
+ * SDK 在子模块 sdk/（IndoorKit 仓库），它自己的边界由那边的测试守着；
+ * 这里守业务层（domains/*）不碰地图和 DOM、页面只用 SDK 的公开接口、
+ * React 只出现在应用里（docs/adr/0007-sdk-and-demo-repositories.md）。
  */
 const ROOT = join(import.meta.dirname, '..');
 
@@ -40,7 +40,7 @@ function offending(files: string[], bad: (module: string, file: string) => boole
   );
 }
 
-const packages = sourceFiles('packages').filter((f) => f.includes('/src/'));
+const packages = sourceFiles('sdk/packages').filter((f) => f.includes('/src/'));
 const domains = sourceFiles('domains').filter((f) => f.includes('/src/'));
 const pages = sourceFiles('apps/playground/src/pages');
 const APP = 'apps/playground/src';
@@ -60,7 +60,7 @@ const resolveImport = (file: string, module: string) =>
 describe('layer directories', () => {
   it.each([
     'domains/hospital/src',
-    'packages/rtls/src',
+    'sdk/packages/rtls/src',
     'apps/playground/src/engine',
     'apps/playground/src/adapters',
     'apps/playground/src/presentation',
@@ -74,94 +74,18 @@ describe('layer directories', () => {
     'domains/museum/src',
     'apps/playground/src/museum',
     'docs/adr/0005-museum-scenario.md',
+    'docs/adr/0007-sdk-and-demo-repositories.md',
   ])('%s exists', (path) => {
     expect(existsSync(join(ROOT, path))).toBe(true);
   });
 });
 
 describe('map engine layer', () => {
-  it('only @indoorkit/core imports maplibre-gl inside the SDK', () => {
-    expect(
-      offending(
-        packages.filter((f) => !f.startsWith('packages/core/')),
-        (m) => m === 'maplibre-gl' || m.startsWith('maplibre-gl/'),
-      ),
-    ).toEqual([]);
-  });
-
   it('the app loads maplibre-gl only in engine/ and testing/', () => {
     const app = sourceFiles('apps/playground/src').filter(
       (f) => !f.startsWith('apps/playground/src/engine/') && !f.startsWith('apps/playground/src/testing/'),
     );
     expect(offending(app, (m) => m.startsWith('maplibre-gl'))).toEqual([]);
-  });
-});
-
-describe('SDK layer', () => {
-  it('imports nothing from the domain, tools or the app', () => {
-    expect(
-      offending(
-        packages,
-        (m) =>
-          m.startsWith('@indoorkit/hospital') ||
-          m.startsWith('@indoorkit/parking') ||
-          m.startsWith('@indoorkit/museum') ||
-          m.startsWith('@indoorkit/rtls-simulator') ||
-          m.startsWith('@indoorkit/venue-gen') ||
-          m.includes('domains/') ||
-          m.includes('apps/') ||
-          m.includes('tools/'),
-      ),
-    ).toEqual([]);
-  });
-
-  it('contains no hospital words', () => {
-    const words =
-      /department|patient|nurse|doctor|visitor|caregiver|hospital|\bsos\b|offline|maintenance|infusion|科室|患者|医院|医护|病房|人员/i;
-    const hits = packages.flatMap((f) =>
-      read(f)
-        .split('\n')
-        .map((line, i) => ({ line, i }))
-        .filter(({ line }) => words.test(line))
-        .map(({ line, i }) => `${f}:${i + 1}: ${line.trim()}`),
-    );
-    expect(hits).toEqual([]);
-  });
-
-  it('contains no parking words', () => {
-    // IMDF 自带的区块类别 parking 不算停车场业务
-    const words = /vehicle|\bplates?\b|tariff|garage|monthly|车位|停车|駐車|車室/i;
-    const hits = packages.flatMap((f) =>
-      read(f)
-        .split('\n')
-        .map((line, i) => ({ line, i }))
-        .filter(({ line }) => words.test(line))
-        .map(({ line, i }) => `${f}:${i + 1}: ${line.trim()}`),
-    );
-    expect(hits).toEqual([]);
-  });
-
-  it('contains no museum words', () => {
-    const words =
-      /museum|gallery|curator|artwork|exhibit|conservation|patrol|展示|藏品|展柜|展厅|博物|美術|学芸|巡回|巡逻/i;
-    const hits = packages.flatMap((f) =>
-      read(f)
-        .split('\n')
-        .map((line, i) => ({ line, i }))
-        .filter(({ line }) => words.test(line))
-        .map(({ line, i }) => `${f}:${i + 1}: ${line.trim()}`),
-    );
-    expect(hits).toEqual([]);
-  });
-
-  it('is plain TypeScript without React or a UI framework', () => {
-    expect(packages.filter((f) => f.endsWith('.tsx'))).toEqual([]);
-    expect(offending(packages, (m) => /^(react|react-dom|@mui\/|@emotion\/)/.test(m))).toEqual([]);
-  });
-
-  it('core declares no positioning types or events', () => {
-    const types = read('packages/core/src/types.ts');
-    expect(types).not.toMatch(/TagPosition|PositionBatch|DataProvider|positions:update|geofence/);
   });
 });
 

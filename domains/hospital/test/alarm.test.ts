@@ -2,7 +2,7 @@ import { buildVenueModel, type ImdfArchive, type RawCollection } from '@indoorki
 import { createVenueIndex } from '@indoorkit/plugins';
 import type { PositionBatch, TagPosition } from '@indoorkit/rtls';
 import { describe, expect, it } from 'vitest';
-import { IDS, makeArchive } from '../../../packages/imdf/test/fixture';
+import { IDS, makeArchive } from '../../../sdk/packages/imdf/test/fixture';
 import {
   type AlarmSubject,
   createAlarmEngine,

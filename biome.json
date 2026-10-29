@@ -3,6 +3,7 @@
   "files": {
     "includes": [
       "**",
+      "!sdk",
       "!**/dist",
       "!**/node_modules",
       "!**/public/data",

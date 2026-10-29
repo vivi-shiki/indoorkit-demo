@@ -1,7 +1,7 @@
 import { buildVenueModel, type RawCollection, validateImdf } from '@indoorkit/imdf';
 import { createVenueIndex } from '@indoorkit/plugins';
 import { describe, expect, it } from 'vitest';
-import { IDS, makeArchive } from '../../../packages/imdf/test/fixture';
+import { IDS, makeArchive } from '../../../sdk/packages/imdf/test/fixture';
 import { createHospital, departmentExtension, departmentsOf } from '../src/index';
 
 const venue = buildVenueModel(makeArchive(), [departmentExtension]);

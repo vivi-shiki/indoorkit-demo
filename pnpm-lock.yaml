@@ -23,9 +23,6 @@ importers:
       '@types/three':
         specifier: ^0.186.0
         version: 0.186.0
-      happy-dom:
-        specifier: ^21.0.3
-        version: 21.0.3
       tsx:
         specifier: ^4.20.0
         version: 4.23.15
@@ -49,13 +46,13 @@ importers:
         version: 11.14.1(@emotion/react@11.14.0(@types/react@19.3.0)(react@19.3.1))(@types/react@19.3.0)(react@19.3.1)
       '@indoorkit/core':
         specifier: workspace:*
-        version: link:../../packages/core
+        version: link:../../sdk/packages/core
       '@indoorkit/hospital':
         specifier: workspace:*
         version: link:../../domains/hospital
       '@indoorkit/imdf':
         specifier: workspace:*
-        version: link:../../packages/imdf
+        version: link:../../sdk/packages/imdf
       '@indoorkit/museum':
         specifier: workspace:*
         version: link:../../domains/museum
@@ -70,10 +67,10 @@ importers:
         version: link:../../tools/parking-simulator
       '@indoorkit/plugins':
         specifier: workspace:*
-        version: link:../../packages/plugins
+        version: link:../../sdk/packages/plugins
       '@indoorkit/rtls':
         specifier: workspace:*
-        version: link:../../packages/rtls
+        version: link:../../sdk/packages/rtls
       '@indoorkit/rtls-simulator':
         specifier: workspace:*
         version: link:../../tools/rtls-simulator
@@ -113,10 +110,10 @@ importers:
     dependencies:
       '@indoorkit/imdf':
         specifier: workspace:*
-        version: link:../../packages/imdf
+        version: link:../../sdk/packages/imdf
       '@indoorkit/rtls':
         specifier: workspace:*
-        version: link:../../packages/rtls
+        version: link:../../sdk/packages/rtls
       '@turf/boolean-point-in-polygon':
         specifier: ^7.4.0
         version: 7.4.0
@@ -126,13 +123,13 @@ importers:
     devDependencies:
       '@indoorkit/plugins':
         specifier: workspace:*
-        version: link:../../packages/plugins
+        version: link:../../sdk/packages/plugins
 
   domains/museum:
     dependencies:
       '@indoorkit/imdf':
         specifier: workspace:*
-        version: link:../../packages/imdf
+        version: link:../../sdk/packages/imdf
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -141,12 +138,12 @@ importers:
     dependencies:
       '@indoorkit/imdf':
         specifier: workspace:*
-        version: link:../../packages/imdf
+        version: link:../../sdk/packages/imdf
       zod:
         specifier: ^4.6.7
         version: 4.6.7
 
-  packages/core:
+  sdk/packages/core:
     dependencies:
       '@indoorkit/imdf':
         specifier: workspace:*
@@ -159,13 +156,13 @@ importers:
         specifier: ^6.15.0
         version: 6.15.0
 
-  packages/imdf:
+  sdk/packages/imdf:
     dependencies:
       zod:
         specifier: ^4.6.7
         version: 4.6.7
 
-  packages/plugins:
+  sdk/packages/plugins:
     dependencies:
       '@indoorkit/core':
         specifier: workspace:*
@@ -190,7 +187,7 @@ importers:
         specifier: ^6.15.0
         version: 6.15.0
 
-  packages/rtls:
+  sdk/packages/rtls:
     dependencies:
       '@indoorkit/core':
         specifier: workspace:*
@@ -204,13 +201,13 @@ importers:
     dependencies:
       '@indoorkit/imdf':
         specifier: workspace:*
-        version: link:../../packages/imdf
+        version: link:../../sdk/packages/imdf
       '@indoorkit/museum':
         specifier: workspace:*
         version: link:../../domains/museum
       '@indoorkit/rtls':
         specifier: workspace:*
-        version: link:../../packages/rtls
+        version: link:../../sdk/packages/rtls
     devDependencies:
       '@indoorkit/venue-gen':
         specifier: workspace:*
@@ -220,13 +217,13 @@ importers:
     dependencies:
       '@indoorkit/imdf':
         specifier: workspace:*
-        version: link:../../packages/imdf
+        version: link:../../sdk/packages/imdf
       '@indoorkit/parking':
         specifier: workspace:*
         version: link:../../domains/parking
       '@indoorkit/rtls':
         specifier: workspace:*
-        version: link:../../packages/rtls
+        version: link:../../sdk/packages/rtls
     devDependencies:
       '@indoorkit/venue-gen':
         specifier: workspace:*
@@ -239,10 +236,10 @@ importers:
         version: link:../../domains/hospital
       '@indoorkit/imdf':
         specifier: workspace:*
-        version: link:../../packages/imdf
+        version: link:../../sdk/packages/imdf
       '@indoorkit/rtls':
         specifier: workspace:*
-        version: link:../../packages/rtls
+        version: link:../../sdk/packages/rtls
       comlink:
         specifier: ^4.4.2
         version: 4.4.2
@@ -264,7 +261,7 @@ importers:
         version: link:../../domains/hospital
       '@indoorkit/imdf':
         specifier: workspace:*
-        version: link:../../packages/imdf
+        version: link:../../sdk/packages/imdf
       '@indoorkit/museum':
         specifier: workspace:*
         version: link:../../domains/museum
@@ -2009,11 +2006,13 @@ snapshots:
 
   '@types/webxr@0.5.24': {}
 
-  '@types/whatwg-mimetype@3.0.2': {}
+  '@types/whatwg-mimetype@3.0.2':
+    optional: true
 
   '@types/ws@8.18.2':
     dependencies:
       '@types/node': 22.20.5
+    optional: true
 
   '@vitejs/plugin-react@6.1.2(vite@8.3.4(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15))':
     dependencies:
@@ -2046,6 +2045,7 @@ snapshots:
   buffer-image-size@0.6.4:
     dependencies:
       '@types/node': 22.20.5
+    optional: true
 
   callsites@3.1.0: {}
 
@@ -2080,7 +2080,8 @@ snapshots:
 
   earcut@3.2.4: {}
 
-  entities@7.0.1: {}
+  entities@7.0.1:
+    optional: true
 
   error-ex@1.3.4:
     dependencies:
@@ -2160,6 +2161,7 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+    optional: true
 
   hasown@2.0.4:
     dependencies:
@@ -2469,11 +2471,13 @@ snapshots:
     transitivePeerDependencies:
       - msw
 
-  whatwg-mimetype@3.0.0: {}
+  whatwg-mimetype@3.0.0:
+    optional: true
 
   why-is-node-running@3.2.1: {}
 
-  ws@8.22.0: {}
+  ws@8.22.0:
+    optional: true
 
   yaml@1.10.3: {}
 

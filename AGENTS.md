@@ -2,14 +2,13 @@
 
 Project instructions shared by AI collaborators and human developers. Claude Code loads this file through `CLAUDE.md`; Codex reads `AGENTS.md` directly.
 
+This repository holds the demo app and everything built on the IndoorKit SDK. The SDK itself lives in the IndoorKit repository.
+
 ## Layout
 
 | Path | Responsibility |
 | --- | --- |
-| `packages/imdf` | Read IMDF, validate with zod, convert to `VenueModel`; extension files via `defineImdfExtension` |
-| `packages/rtls` | Real-time positioning contract: `TagPosition`, `PositionBatch`, `DataProvider`, `positions:update` |
-| `packages/core` | `createIndoorMap`, camera, plugin system, `ResourceTracker`, `EventBus`, style generation. The only package that imports maplibre-gl |
-| `packages/plugins` | Official plugins (`floor`, `zone`, `position-stream`, `unit-cluster`, `unit-state`, `route`, `heatmap`, ...). No hospital, parking or museum concepts |
+| `sdk/` | Git submodule of the [IndoorKit](https://github.com/vivi-shiki/IndoorKit) SDK repository (`packages/imdf`, `rtls`, `core`, `plugins`), linked into the pnpm workspace. Change SDK code in IndoorKit, then move the submodule with `pnpm sdk:update` ([ADR 0007](docs/adr/0007-sdk-and-demo-repositories.md)) |
 | `domains/hospital` | Hospital business logic without a map or DOM: departments, roster model, alarm rules and engine |
 | `domains/parking` | Parking business logic without a map or DOM: zones, devices and lanes (IMDF extensions), tariff, three-tier alarms, lane routing, bookings, statistics and suggestions |
 | `domains/museum` | Museum business logic without a map or DOM: rooms, cases, objects, devices and routes (IMDF extensions), conservation standards, light exposure and display days, three-tier alarms, patrol and object-move checks, rotation suggestions |
@@ -26,7 +25,7 @@ React and MUI are used only in `apps/` ([ADR 0003](docs/adr/0003-react-app.md));
 
 ```bash
 pnpm verify   # lint + typecheck + unit tests
-pnpm build    # generate data + build packages + build playground
+pnpm build    # generate data + build playground
 pnpm e2e      # end-to-end and memory regression tests (run pnpm build first)
 ```
 
@@ -42,6 +41,8 @@ Do not call vite, tsc, vitest or playwright directly. The one exception is narro
 
 ## Rules
 
+- Clone with `--recurse-submodules`, or run `git submodule update --init` before `pnpm install`.
+- Do not edit files under `sdk/`; they belong to the IndoorKit repository.
 - Write the test first, then the implementation. Commit only when `pnpm verify` and `pnpm e2e` both pass.
 - Do not commit data about any real hospital, company or person.
 - End every commit message with the trailer `Co-authored-by: vivi-shiki <70496895+vivi-shiki@users.noreply.github.com>`, after any other trailers, so the project owner is credited on GitHub.

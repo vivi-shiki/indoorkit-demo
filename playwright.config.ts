@@ -8,7 +8,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   workers: 2,
   use: {
-    baseURL: externalURL ?? `http://localhost:${PORT}/IndoorKit/`,
+    baseURL: externalURL ?? `http://localhost:${PORT}/indoorkit-demo/`,
     ...devices['Desktop Chrome'],
     launchOptions: {
       args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'],
@@ -22,7 +22,7 @@ export default defineConfig({
     ? undefined
     : {
         command: 'pnpm --filter playground run preview',
-        url: `http://localhost:${PORT}/IndoorKit/`,
+        url: `http://localhost:${PORT}/indoorkit-demo/`,
         reuseExistingServer: !process.env.CI,
         timeout: 60_000,
       },

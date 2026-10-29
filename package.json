@@ -1,5 +1,5 @@
 {
-  "name": "indoorkit",
+  "name": "indoorkit-demo",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.34.7",
@@ -13,9 +13,9 @@
     "test": "vitest run",
     "verify": "pnpm lint && pnpm typecheck && pnpm test",
     "gen:venue": "pnpm --filter @indoorkit/venue-gen run generate",
-    "build:lib": "pnpm --filter \"./packages/*\" run build",
-    "build": "pnpm gen:venue && pnpm build:lib && pnpm --filter playground run build",
-    "e2e": "playwright test"
+    "build": "pnpm gen:venue && pnpm --filter playground run build",
+    "e2e": "playwright test",
+    "sdk:update": "git submodule update --remote sdk"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
@@ -23,7 +23,6 @@
     "@types/geojson": "^7946.0.16",
     "@types/node": "^22.19.0",
     "@types/three": "^0.186.0",
-    "happy-dom": "^21.0.3",
     "tsx": "^4.20.0",
     "typescript": "~5.9.3",
     "vite": "^8.3.4",

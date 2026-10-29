@@ -5,7 +5,7 @@ import { buildVenueModel } from '@indoorkit/imdf';
 import { floorPlugin, polygonPlugin, positionStreamPlugin } from '@indoorkit/plugins';
 import { createManualProvider } from '@indoorkit/rtls/testing';
 import { describe, expect, it } from 'vitest';
-import { IDS, makeArchive } from '../../../packages/imdf/test/fixture';
+import { IDS, makeArchive } from '../../../sdk/packages/imdf/test/fixture';
 import { hospitalAlarmPlugin } from '../src/adapters/alarm';
 
 const HALL: [number, number] = [0.0015, 0.0005];
