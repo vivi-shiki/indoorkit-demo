@@ -61,3 +61,9 @@ See ADR 0008. Frames carry the Redis Stream id as their sequence number so the g
 
 - The integration test for asset history found that device-sim never passed `ASSETS` to the simulation, so the backend had no assets. Fixed; the R2 snapshot test now expects people plus assets.
 - `pnpm verify` 516 tests, `pnpm backend:test` 19/19, `pnpm e2e:live` 7/7.
+
+## Side fix: 3D twin e2e timing out on CI (separate commit)
+
+- From ec50f42 (docs only) CI failed with the twin specs timing out; the passing run before already used 2.0 of 2.5 minutes. Reproduced locally by limiting to 2 CPUs (`taskset -c 0,1`, CI settings, no retries): 6 twin tests failed. Two twin tests rendering on SwiftShader at the same time starve each other, and the 390px inspection timed out creating its browser context because the 30 s default timeout applied to fixtures.
+- Fix: a `twin` Playwright project for the twin specs (including the leak-bench one) with `workers: 1` and a project timeout of 150 s that covers fixtures.
+- Confirmed: full suite on 2 CPUs, no retries, 170/170; slowest twin test 1.9 min.

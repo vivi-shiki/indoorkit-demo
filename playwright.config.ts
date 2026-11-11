@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const PORT = 4173;
+const TWIN = /(apps\/playground\/e2e|tools\/leak-bench)\/twin[^/]*\.spec\.ts$/;
 const externalURL = process.env.INDOORKIT_TEST_BASE_URL;
 
 export default defineConfig({
@@ -15,8 +16,11 @@ export default defineConfig({
     },
   },
   projects: [
-    { name: 'e2e', testDir: 'apps/playground/e2e' },
-    { name: 'leak-bench', testDir: 'tools/leak-bench', workers: 1 },
+    { name: 'e2e', testDir: 'apps/playground/e2e', testIgnore: TWIN },
+    { name: 'leak-bench', testDir: 'tools/leak-bench', testIgnore: TWIN, workers: 1 },
+    // 3D 孪生页在 SwiftShader 上用 CPU 渲染，两个同时跑会互相拖慢到超时（CI 只有 4 核）：
+    // 单独一个项目、一次一个；超时放在项目上，连建 context 的时间也算进去
+    { name: 'twin', testDir: '.', testMatch: TWIN, workers: 1, timeout: 150_000 },
     // 连真实后端的测试只在 pnpm e2e:live 时运行（docs/backend/README.md）
     ...(process.env.INDOORKIT_LIVE_URL
       ? [{ name: 'live', testDir: 'apps/playground/e2e-live', workers: 1 }]
