@@ -1,0 +1,7 @@
+**/node_modules
+**/dist
+.git
+apps/playground/public
+test-results
+playwright-report
+docs

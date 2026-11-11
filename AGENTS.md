@@ -17,6 +17,10 @@ This repository holds the demo app and everything built on the IndoorKit SDK. Th
 | `tools/parking-simulator` | Seeded day of vehicles, reservations and device incidents for the parking demo, with a data provider for vehicles on the move |
 | `tools/museum-simulator` | Seeded day of climate and light readings, visitors, guards, object moves and security events for the museum demo, with a data provider for tagged visitors |
 | `tools/leak-bench` | Playwright memory regression tests |
+| `packages/protocol` | Live backend message contract: MQTT topics, Redis keys, zod schemas for device reports and WebSocket frames ([ADR 0008](docs/adr/0008-live-backend.md)) |
+| `packages/live-client` | Browser `DataProvider` over the live gateway: reconnect with backoff, resume, heartbeat, duplicate dropping |
+| `services/` | Live backend: `device-sim` (devices over MQTT, fault injection), `ingest` (MQTT → Redis), `gateway` (WebSocket), `kit` (config, health, metrics, shutdown), `test` (integration tests against Compose). Requirements in [docs/backend](docs/backend/README.md) |
+| `deploy/` | `compose.yaml` for the local backend, the shared service `Dockerfile`, Mosquitto config |
 | `apps/playground` | React + MUI demo app, deployed to GitHub Pages: `app/` (hash router, scenario sidebar / top menu, shared map helpers, theme), `engine/`, `adapters/`, `presentation/`, `pages/<page>/{index,view}.tsx` (hospital pages; `home` shows the three scenarios side by side, as a carousel on phones), `testing/`. `parking/` is the self-contained parking demo with the same inner layout ([ADR 0004](docs/adr/0004-parking-scenario.md)); `museum/` is the self-contained museum demo ([ADR 0005](docs/adr/0005-museum-scenario.md)) |
 
 React and MUI are used only in `apps/` ([ADR 0003](docs/adr/0003-react-app.md)); the SDK packages and `domains/` stay framework-free TypeScript. The layers and what each may import are described in [ADR 0002](docs/adr/0002-sdk-and-domain-layers.md) and checked by `test/layers.test.ts`.
@@ -27,6 +31,16 @@ React and MUI are used only in `apps/` ([ADR 0003](docs/adr/0003-react-app.md));
 pnpm verify   # lint + typecheck + unit tests
 pnpm build    # generate data + build playground
 pnpm e2e      # end-to-end and memory regression tests (run pnpm build first)
+```
+
+The live backend adds (Docker required, see [docs/backend](docs/backend/README.md)):
+
+```bash
+pnpm backend:up     # build and start Mosquitto, Redis, MongoDB and the three services
+pnpm backend:test   # integration tests against that stack
+pnpm e2e:live       # browser tests against that stack (run pnpm build first)
+pnpm dev:live       # dev server connected to ws://localhost:8080/ws
+pnpm backend:down
 ```
 
 Do not call vite, tsc, vitest or playwright directly. The one exception is narrowing a run while reproducing an intermittent failure, as described in [docs/guidelines/coding.md](docs/guidelines/coding.md#memory-leaks-and-intermittent-failures).

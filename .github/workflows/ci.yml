@@ -46,8 +46,37 @@ jobs:
         with:
           path: apps/playground/dist
 
+  # 实时数据后端：起 compose，跑集成测试和连后端的浏览器测试（docs/backend/README.md）
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Start the backend
+        run: pnpm backend:up
+      - name: Backend integration tests
+        run: pnpm backend:test
+      - name: Build
+        run: pnpm build
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Browser tests against the backend
+        run: pnpm e2e:live
+      - name: Service logs
+        if: failure()
+        run: docker compose -f deploy/compose.yaml logs --no-color --tail 200
+      - run: pnpm backend:down
+        if: always()
+
   deploy:
-    needs: verify
+    needs: [verify, backend]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:

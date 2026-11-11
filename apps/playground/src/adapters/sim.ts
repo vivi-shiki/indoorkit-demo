@@ -1,10 +1,11 @@
 import type { VenueModel } from '@indoorkit/imdf';
+import { HOSPITAL_SEED } from '@indoorkit/protocol';
 import { createWorkerProvider } from '@indoorkit/rtls-simulator';
 import { stats } from '../testing/hooks';
 
 export const SIM_INTERVAL_MS = 1000;
-/** 人员相关页面用同一个种子，同一个编号就是同一个人 */
-export const PEOPLE_SEED = 'playground';
+/** 人员相关页面用同一个种子，同一个编号就是同一个人；后端的模拟器也用它（docs/backend/R2-01） */
+export const PEOPLE_SEED = HOSPITAL_SEED;
 
 /** 在 Worker 里运行定位模拟；终止时更新全局 Worker 计数 */
 export function createSimProvider(

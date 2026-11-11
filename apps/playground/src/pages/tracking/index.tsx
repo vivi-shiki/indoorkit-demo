@@ -1,12 +1,15 @@
 import type { Person } from '@indoorkit/hospital';
 import { floorPlugin, positionStreamPlugin, zonePlugin } from '@indoorkit/plugins';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createRoster, createSimProvider, PEOPLE_SEED, SIM_INTERVAL_MS } from '../../adapters/sim';
+import { createPeopleSource, LIVE_PEOPLE, usesBackend } from '../../adapters/live';
+import type { SourceStatus, SwitchingProvider } from '../../adapters/live-source';
+import { createRoster, SIM_INTERVAL_MS } from '../../adapters/sim';
 import { placesOf } from '../../adapters/venue';
 import { type HospitalPageProps, hospitalHref } from '../../app/routes';
 import { useT } from '../../app-i18n';
 import { ROLE_COLORS, ROLES, roleColor } from '../../presentation/colors';
 import { personName } from '../../presentation/format';
+import { LiveStatusMetric } from '../../presentation/live-status';
 import { PerfOverlay, type PerfSnapshot } from '../../presentation/perf';
 import { ChipGroup, RadioGroup } from '../../presentation/ui';
 import { floorName, MapPageLayout, useMapEvent, useMapPage, useRefresh } from '../map-page';
@@ -18,22 +21,26 @@ const NONE: ReadonlySet<string> = new Set();
 export function TrackingPage({ query }: HospitalPageProps) {
   const t = useT();
   const requested = Number(query.get('tags'));
-  const tags = TAG_COUNTS.includes(requested) ? requested : 2000;
+  // 连后端时人数由服务器决定，名册要和它一致（docs/backend/R2-15）
+  const backend = usesBackend(query);
+  const tags = backend ? LIVE_PEOPLE : TAG_COUNTS.includes(requested) ? requested : 2000;
   // 选中的数量立即显示，随后换地址重新进入页面
   const [tagChoice, setTagChoice] = useState(String(tags));
   // 插件给标签着色时要查角色，名册在场馆加载后才有
   const people = useRef(new Map<string, Person>());
   const stageRef = useRef<HTMLDivElement>(null);
+  const source = useRef<SwitchingProvider | null>(null);
   const [page, load] = useMapPage(stageRef, {
     demo: 'tracking',
     readyWhen: 'first-positions',
     plugins: (venue) => {
       people.current = new Map(createRoster(venue, { people: tags, assets: 0 }).people.map((p) => [p.id, p]));
+      source.current = createPeopleSource(venue, { people: tags, query });
       return [
         floorPlugin,
         zonePlugin({ zones: placesOf(venue).hospital.zones() }),
         positionStreamPlugin({
-          provider: createSimProvider(venue, { people: tags, seed: PEOPLE_SEED }),
+          provider: source.current,
           intervalMs: SIM_INTERVAL_MS,
           decorate: (id) => ({ role: people.current.get(id)?.role ?? 'nurse' }),
           circleColor: roleColor,
@@ -41,6 +48,16 @@ export function TrackingPage({ query }: HospitalPageProps) {
       ] as const;
     },
   });
+  // 数据源状态：地图销毁时数据源随插件一起释放，监听也随之清掉
+  const [liveStatus, setLiveStatus] = useState<SourceStatus | null>(null);
+  useEffect(() => {
+    const p = source.current;
+    if (!page || !p) return;
+    setLiveStatus(p.status());
+    page.hooks.liveStatus = () => p.status();
+    return p.onStatus(setLiveStatus);
+  }, [page]);
+
   const roster = useMemo(() => (page ? [...people.current.values()] : []), [page]);
   const stream = page?.indoor.plugins['position-stream'];
 
@@ -204,17 +221,24 @@ export function TrackingPage({ query }: HospitalPageProps) {
       load={load}
       controls={
         <>
-          <RadioGroup
-            name="tags"
-            label="control.tags"
-            values={TAG_COUNTS.map((n) => ({ value: String(n), text: n.toLocaleString('en-US') }))}
-            selected={tagChoice}
-            // 换标签数量时重新进入页面，旧地图和 Worker 随之释放
-            onChange={(value) => {
-              setTagChoice(value);
-              location.hash = hospitalHref('tracking', `tags=${value}`);
-            }}
-          />
+          <LiveStatusMetric status={liveStatus} />
+          {backend ? (
+            <span className="hint" data-testid="fixed-tags">
+              {t('live.fixedTags')}
+            </span>
+          ) : (
+            <RadioGroup
+              name="tags"
+              label="control.tags"
+              values={TAG_COUNTS.map((n) => ({ value: String(n), text: n.toLocaleString('en-US') }))}
+              selected={tagChoice}
+              // 换标签数量时重新进入页面，旧地图和 Worker 随之释放
+              onChange={(value) => {
+                setTagChoice(value);
+                location.hash = hospitalHref('tracking', `tags=${value}`);
+              }}
+            />
+          )}
           <ChipGroup
             testId="role-chip"
             items={ROLES.map((r) => ({ value: r, text: t(`role.${r}`), color: ROLE_COLORS[r] }))}

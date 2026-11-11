@@ -19,12 +19,18 @@
   },
   "include": [
     "domains/*/src",
+    "packages/*/src",
+    "packages/*/test",
+    "services/*/src",
+    "services/*/test",
+    "services/test",
     "domains/*/test",
     "tools/*/src",
     "tools/*/test",
     "tools/leak-bench",
     "apps/*/src",
     "apps/*/e2e",
+    "apps/*/e2e-live",
     "apps/*/test",
     "test",
     "*.config.ts"

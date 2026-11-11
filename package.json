@@ -15,7 +15,12 @@
     "gen:venue": "pnpm --filter @indoorkit/venue-gen run generate",
     "build": "pnpm gen:venue && pnpm --filter playground run build",
     "e2e": "playwright test",
-    "sdk:update": "git submodule update --remote sdk"
+    "sdk:update": "git submodule update --remote sdk",
+    "backend:up": "docker compose -f deploy/compose.yaml up -d --build --wait",
+    "backend:down": "docker compose -f deploy/compose.yaml down",
+    "backend:test": "vitest run --config vitest.backend.config.ts",
+    "e2e:live": "playwright test -c playwright.live.config.ts",
+    "dev:live": "pnpm --filter playground run dev:live"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",

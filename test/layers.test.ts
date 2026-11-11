@@ -285,3 +285,50 @@ describe('museum scenario', () => {
     expect(hits).toEqual([]);
   });
 });
+
+describe('backend services (docs/backend/R1-04)', () => {
+  const services = sourceFiles('services').filter((f) => f.includes('/src/'));
+  const shared = sourceFiles('packages').filter((f) => f.includes('/src/'));
+
+  it('has the three services and the shared packages', () => {
+    for (const name of ['device-sim', 'ingest', 'gateway']) {
+      expect(services).toContain(`services/${name}/src/main.ts`);
+    }
+    expect(shared).toContain('packages/protocol/src/index.ts');
+    expect(shared).toContain('packages/live-client/src/index.ts');
+  });
+
+  it('services use no app code, UI framework, map engine or map SDK runtime', () => {
+    expect(
+      offending(
+        services,
+        (m, f) =>
+          resolveImport(f, m).startsWith('apps/') ||
+          /^(react|react-dom|@mui\/|@emotion\/|maplibre-gl)/.test(m) ||
+          m === '@indoorkit/core' ||
+          m.startsWith('@indoorkit/core/') ||
+          m.startsWith('@indoorkit/plugins'),
+      ),
+    ).toEqual([]);
+  });
+
+  it('the protocol and the browser client stay free of apps, UI and the map', () => {
+    expect(
+      offending(
+        shared,
+        (m, f) =>
+          resolveImport(f, m).startsWith('apps/') ||
+          /^(react|react-dom|@mui\/|@emotion\/|maplibre-gl|node:)/.test(m) ||
+          m.startsWith('@indoorkit/core') ||
+          m.startsWith('@indoorkit/plugins'),
+      ),
+    ).toEqual([]);
+  });
+
+  it('only the browser client and the app use the live client', () => {
+    const users = [...services, ...domains, ...packages].filter(
+      (f) => !f.startsWith('packages/live-client/'),
+    );
+    expect(offending(users, (m) => m.startsWith('@indoorkit/live-client'))).toEqual([]);
+  });
+});

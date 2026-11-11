@@ -1,0 +1,13 @@
+# 调试用：叠加在 compose.yaml 上，开放内部端口给宿主机
+#   docker compose -f deploy/compose.yaml -f deploy/compose.debug.yaml up -d
+services:
+  mosquitto:
+    ports: ["1883:1883"]
+  redis:
+    ports: ["6379:6379"]
+  mongo:
+    ports: ["27017:27017"]
+  device-sim:
+    ports: ["8081:8081"]
+  ingest:
+    ports: ["8082:8082"]

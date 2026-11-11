@@ -17,6 +17,10 @@ export default defineConfig({
   projects: [
     { name: 'e2e', testDir: 'apps/playground/e2e' },
     { name: 'leak-bench', testDir: 'tools/leak-bench', workers: 1 },
+    // 连真实后端的测试只在 pnpm e2e:live 时运行（docs/backend/README.md）
+    ...(process.env.INDOORKIT_LIVE_URL
+      ? [{ name: 'live', testDir: 'apps/playground/e2e-live', workers: 1 }]
+      : []),
   ],
   webServer: externalURL
     ? undefined

@@ -7,6 +7,8 @@ export default defineConfig({
       'domains/*/test/**/*.test.ts',
       'tools/*/test/**/*.test.ts',
       'apps/*/test/**/*.test.ts',
+      'packages/*/test/**/*.test.ts',
+      'services/*/test/**/*.test.ts',
     ],
     environment: 'node',
     maxWorkers: 2,

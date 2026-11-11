@@ -48,6 +48,8 @@ export interface ViviTestHooks {
   detailAsset(): string | null;
   /** 一台不在当前楼层的设备 */
   assetOnAnotherFloor(): { id: string; code: string; floor: string };
+  /** 数据源状态：后端还是浏览器模拟、连接状态、延迟、补发和丢弃（docs/backend/R2-14、R3-12） */
+  liveStatus(): import('../adapters/live-source').SourceStatus;
   // 轨迹回放
   trailPerson(): string;
   trailRange(): [number, number];
@@ -114,6 +116,7 @@ export function setHooks(partial: Partial<ViviTestHooks> & Pick<ViviTestHooks, '
     drawerUnit: unavailable,
     detailAsset: unavailable,
     assetOnAnotherFloor: unavailable,
+    liveStatus: unavailable,
     trailPerson: unavailable,
     trailRange: unavailable,
     trailTime: unavailable,

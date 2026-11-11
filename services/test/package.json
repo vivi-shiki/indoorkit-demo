@@ -1,0 +1,11 @@
+{
+  "name": "@indoorkit/backend-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@indoorkit/live-client": "workspace:*",
+    "@indoorkit/protocol": "workspace:*",
+    "@indoorkit/rtls": "workspace:*"
+  }
+}

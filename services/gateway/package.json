@@ -1,0 +1,22 @@
+{
+  "name": "@indoorkit/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "bundle": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node22 --external:bufferutil --external:utf-8-validate --outfile=dist/main.js --banner:js=\"import{createRequire as __cr}from'module';const require=__cr(import.meta.url);\""
+  },
+  "dependencies": {
+    "@indoorkit/protocol": "workspace:*",
+    "@indoorkit/service-kit": "workspace:*",
+    "ioredis": "^5.11.1",
+    "ws": "^8.22.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "tsx": "^4.20.0",
+    "@types/ws": "^8.18.2"
+  }
+}

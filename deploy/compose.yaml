@@ -1,0 +1,93 @@
+# 本地后端：docker compose -f deploy/compose.yaml up -d --build（docs/backend/R1-08）
+# 只对宿主机开放 gateway 的 8080；调试时叠加 compose.debug.yaml 开放其他端口。
+name: indoorkit
+
+x-service: &service
+  restart: unless-stopped
+  stop_grace_period: 10s
+
+services:
+  mosquitto:
+    <<: *service
+    image: eclipse-mosquitto:2
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/broker/uptime", "-C", "1", "-W", "3"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    <<: *service
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mongo:
+    <<: *service
+    image: mongo:7
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  device-sim:
+    <<: *service
+    build: { context: .., dockerfile: deploy/Dockerfile, args: { SERVICE: device-sim } }
+    image: indoorkit/device-sim:dev
+    environment:
+      MQTT_URL: mqtt://mosquitto:1883
+      HTTP_PORT: "8081"
+    depends_on:
+      mosquitto: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  ingest:
+    <<: *service
+    build: { context: .., dockerfile: deploy/Dockerfile, args: { SERVICE: ingest } }
+    image: indoorkit/ingest:dev
+    environment:
+      MQTT_URL: mqtt://mosquitto:1883
+      REDIS_URL: redis://redis:6379
+      HTTP_PORT: "8082"
+    depends_on:
+      mosquitto: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      mongo: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8082/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  gateway:
+    <<: *service
+    build: { context: .., dockerfile: deploy/Dockerfile, args: { SERVICE: gateway } }
+    image: indoorkit/gateway:dev
+    environment:
+      REDIS_URL: redis://redis:6379
+      PORT: "8080"
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  mongo-data:
