@@ -2,7 +2,7 @@ import type { Person } from '@indoorkit/hospital';
 import { floorPlugin, positionStreamPlugin, zonePlugin } from '@indoorkit/plugins';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPeopleSource, LIVE_PEOPLE, usesBackend } from '../../adapters/live';
-import type { SourceStatus, SwitchingProvider } from '../../adapters/live-source';
+import type { SwitchingProvider } from '../../adapters/live-source';
 import { createRoster, SIM_INTERVAL_MS } from '../../adapters/sim';
 import { placesOf } from '../../adapters/venue';
 import { type HospitalPageProps, hospitalHref } from '../../app/routes';
@@ -12,7 +12,7 @@ import { personName } from '../../presentation/format';
 import { LiveStatusMetric } from '../../presentation/live-status';
 import { PerfOverlay, type PerfSnapshot } from '../../presentation/perf';
 import { ChipGroup, RadioGroup } from '../../presentation/ui';
-import { floorName, MapPageLayout, useMapEvent, useMapPage, useRefresh } from '../map-page';
+import { floorName, MapPageLayout, useMapEvent, useMapPage, useRefresh, useSourceStatus } from '../map-page';
 import { PersonCard, PersonGroups, SearchResults, TAG_COUNTS } from './view';
 
 const NONE: ReadonlySet<string> = new Set();
@@ -48,15 +48,7 @@ export function TrackingPage({ query }: HospitalPageProps) {
       ] as const;
     },
   });
-  // 数据源状态：地图销毁时数据源随插件一起释放，监听也随之清掉
-  const [liveStatus, setLiveStatus] = useState<SourceStatus | null>(null);
-  useEffect(() => {
-    const p = source.current;
-    if (!page || !p) return;
-    setLiveStatus(p.status());
-    page.hooks.liveStatus = () => p.status();
-    return p.onStatus(setLiveStatus);
-  }, [page]);
+  const liveStatus = useSourceStatus(page, source);
 
   const roster = useMemo(() => (page ? [...people.current.values()] : []), [page]);
   const stream = page?.indoor.plugins['position-stream'];

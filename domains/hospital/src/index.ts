@@ -4,5 +4,6 @@
  */
 export * from './alarm';
 export * from './departments';
+export * from './fences';
 export * from './model';
 export * from './rules';

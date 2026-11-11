@@ -1,4 +1,6 @@
 import {
+  type AlarmRecord,
+  alarmRecordSchema,
   compareSeq,
   FRAME_FIELD,
   parseServerFrame,
@@ -8,7 +10,7 @@ import {
   tagStateSchema,
 } from '@indoorkit/protocol';
 import type { Redis } from 'ioredis';
-import type { FrameStore, SeqFrame } from './store';
+import { type FrameStore, type SeqFrame, SNAPSHOT_ALARMS } from './store';
 
 type Entry = [id: string, fields: string[]];
 
@@ -21,6 +23,14 @@ export function entryToFrame([id, fields]: Entry): SeqFrame {
   return r.value;
 }
 
+/** Redis 里存的告警 JSON → 按时间排序的最近 limit 条 */
+export function latestAlarms(values: string[], limit: number): AlarmRecord[] {
+  return values
+    .map((v) => alarmRecordSchema.parse(JSON.parse(v)))
+    .sort((a, b) => a.time - b.time)
+    .slice(-limit);
+}
+
 export function createRedisStore(redis: Redis): FrameStore {
   return {
     async lastSeq(site) {
@@ -28,13 +38,19 @@ export function createRedisStore(redis: Redis): FrameStore {
       return last[0]?.[0] ?? null;
     },
     async snapshot(site) {
-      const [state, offline, source] = await Promise.all([
+      const [state, offline, source, open] = await Promise.all([
         redis.hgetall(redisKeys.state(site)),
         redis.smembers(redisKeys.offline(site)),
         redis.get(redisKeys.source(site)),
+        redis.hvals(redisKeys.openAlarms(site)),
       ]);
       const positions: TagState[] = Object.values(state).map((v) => tagStateSchema.parse(JSON.parse(v)));
-      return { positions, offline, source: source === null ? undefined : source === 'online' };
+      return {
+        positions,
+        offline,
+        source: source === null ? undefined : source === 'online',
+        alarms: latestAlarms(open, SNAPSHOT_ALARMS),
+      };
     },
     async range(site: Site, after: string) {
       const first = (await redis.xrange(redisKeys.frames(site), '-', '+', 'COUNT', 1)) as Entry[];

@@ -2,7 +2,7 @@
  * device-sim：把浏览器里的医院定位模拟器变成一台台「设备」，每秒通过 MQTT 上报位置。
  * 内部管理接口 POST /faults 可以在运行中注入故障（docs/backend/R3）。
  */
-import { HOSPITAL_SEED, HOSPITAL_TAGS, SOURCE_ONLINE } from '@indoorkit/protocol';
+import { HOSPITAL_ASSETS, HOSPITAL_SEED, HOSPITAL_TAGS, SOURCE_ONLINE } from '@indoorkit/protocol';
 import {
   createLogger,
   createMetrics,
@@ -24,6 +24,7 @@ const config = loadConfig(
     MQTT_URL: z.string().min(1),
     HTTP_PORT: envNumber(8081),
     TAGS: envNumber(HOSPITAL_TAGS),
+    ASSETS: envNumber(HOSPITAL_ASSETS),
     SEED: z.string().default(HOSPITAL_SEED),
     INTERVAL_MS: envNumber(1000),
     FAULT_DROP: envRate(),
@@ -38,6 +39,7 @@ const metrics = createMetrics('ik_device_sim');
 const devices = createHospitalDevices(HOSPITAL_VENUE, {
   seed: config.SEED,
   tags: config.TAGS,
+  assets: config.ASSETS,
   now: Date.now,
 });
 const faults = createFaults({
@@ -89,7 +91,7 @@ const ticker = setInterval(() => {
     metrics.inc('skipped_total', out.length);
     return;
   }
-  for (const m of out) c.publish(m.topic, m.payload, { qos: 0 });
+  for (const m of out) c.publish(m.topic, m.payload, { qos: m.qos ?? 0 });
   metrics.inc('published_total', out.length);
 }, config.INTERVAL_MS);
 
@@ -120,7 +122,7 @@ const http = await startHttp({
     return true;
   },
 });
-log('started', { tags: config.TAGS, port: http.port });
+log('started', { tags: config.TAGS, assets: config.ASSETS, port: http.port });
 
 onShutdown(async () => {
   clearInterval(ticker);

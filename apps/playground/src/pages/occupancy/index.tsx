@@ -1,30 +1,35 @@
 import type { Role } from '@indoorkit/hospital';
 import { floorPlugin, heatmapPlugin, positionStreamPlugin } from '@indoorkit/plugins';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createRoster, createSimProvider, PEOPLE_SEED, SIM_INTERVAL_MS } from '../../adapters/sim';
+import { createPeopleSource, LIVE_PEOPLE, usesBackend } from '../../adapters/live';
+import type { SwitchingProvider } from '../../adapters/live-source';
+import { createRoster, SIM_INTERVAL_MS } from '../../adapters/sim';
+import type { HospitalPageProps } from '../../app/routes';
 import { useT } from '../../app-i18n';
 import { ROLE_COLORS, ROLES } from '../../presentation/colors';
+import { LiveStatusMetric } from '../../presentation/live-status';
 import { ChipGroup, RadioGroup } from '../../presentation/ui';
-import { MapPageLayout, useMapEvent, useMapPage, useRefresh } from '../map-page';
+import { MapPageLayout, useMapEvent, useMapPage, useRefresh, useSourceStatus } from '../map-page';
 import { BusyList, DEFAULT_WINDOW, HEAT_WINDOWS } from './view';
 
-const PEOPLE = 2000;
 const BUSIEST = 3;
 const NONE: ReadonlySet<string> = new Set();
 
 /** 人流密度分析：按时间窗口和角色统计的热力图，以及最忙的区块 */
-export function OccupancyPage() {
+export function OccupancyPage({ query }: HospitalPageProps) {
   const t = useT();
+  // 浏览器模拟和后端都是 2000 人（docs/backend/R4-12）
+  const people = usesBackend(query) ? LIVE_PEOPLE : 2000;
   const stageRef = useRef<HTMLDivElement>(null);
+  const source = useRef<SwitchingProvider | null>(null);
   // 热力图按角色分组；名册在场馆加载后才有
   const roles = useRef(new Map<string, Role>());
   const [page, load] = useMapPage(stageRef, {
     demo: 'occupancy',
     readyWhen: 'first-positions',
     plugins: (venue) => {
-      roles.current = new Map(
-        createRoster(venue, { people: PEOPLE, assets: 0 }).people.map((p) => [p.id, p.role]),
-      );
+      roles.current = new Map(createRoster(venue, { people, assets: 0 }).people.map((p) => [p.id, p.role]));
+      source.current = createPeopleSource(venue, { people, query });
       return [
         floorPlugin,
         heatmapPlugin({
@@ -34,7 +39,7 @@ export function OccupancyPage() {
           groupOf: (p) => roles.current.get(p.id)!,
         }),
         positionStreamPlugin({
-          provider: createSimProvider(venue, { people: PEOPLE, seed: PEOPLE_SEED }),
+          provider: source.current,
           intervalMs: SIM_INTERVAL_MS,
           // 热力图页只看密度，不画单个标签
           visible: false,
@@ -43,6 +48,7 @@ export function OccupancyPage() {
     },
   });
   const heat = page?.indoor.plugins.heatmap;
+  const liveStatus = useSourceStatus(page, source);
 
   const [windowMinutes, setWindowMinutes] = useState(DEFAULT_WINDOW);
   const [groups, setGroups] = useState(NONE);
@@ -102,6 +108,7 @@ export function OccupancyPage() {
             selected={String(windowMinutes)}
             onChange={(v) => setWindowMinutes(Number(v))}
           />
+          <LiveStatusMetric status={liveStatus} />
           <span className="metric">
             {t('metric.heatPoints')}: <b data-testid="heat-points">{pointCount}</b>
           </span>

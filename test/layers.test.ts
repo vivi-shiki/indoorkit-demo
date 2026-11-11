@@ -307,7 +307,8 @@ describe('backend services (docs/backend/R1-04)', () => {
           /^(react|react-dom|@mui\/|@emotion\/|maplibre-gl)/.test(m) ||
           m === '@indoorkit/core' ||
           m.startsWith('@indoorkit/core/') ||
-          m.startsWith('@indoorkit/plugins'),
+          // 区块查询有不带地图的入口，服务端算告警要用（docs/backend/R4-05）
+          (m.startsWith('@indoorkit/plugins') && m !== '@indoorkit/plugins/venue-index'),
       ),
     ).toEqual([]);
   });

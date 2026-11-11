@@ -9,11 +9,14 @@ import {
 import { floorPlugin, type Sample, type Stop, trailPlugin, zonePlugin } from '@indoorkit/plugins';
 import type { PositionBatch } from '@indoorkit/rtls';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { backendApi } from '../../adapters/live';
+import type { SourceStatus } from '../../adapters/live-source';
 import { createRoster, createSimulation, PEOPLE_SEED } from '../../adapters/sim';
 import { placesOf } from '../../adapters/venue';
 import { type HospitalPageProps, hospitalHref } from '../../app/routes';
 import { useT } from '../../app-i18n';
 import { formatClock } from '../../presentation/format';
+import { LiveStatusMetric } from '../../presentation/live-status';
 import { RadioGroup } from '../../presentation/ui';
 import { floorName, MapPageLayout, useMapPage } from '../map-page';
 import { AlarmList, PersonCard, PersonSelect, RANGES, SPEEDS, StopList } from './view';
@@ -28,9 +31,32 @@ const HISTORY_MS = 60 * 60_000;
 /** 每次让出主线程前推进的步数 */
 const CHUNK = 60;
 
-/** 轨迹回放：一个人前 60 分钟的轨迹、停留点和途中报警 */
+/** 真实时间 → 当天本地时间的毫秒数 */
+const wallClock = (time: number) => time - new Date(time).setHours(0, 0, 0, 0);
+
+interface HistoryPoint {
+  ts: number;
+  levelId: string;
+  coord: [number, number];
+}
+
+/** 后端最近一小时的轨迹（docs/backend/R4-14） */
+async function fetchHistory(api: string, deviceId: string, to: number): Promise<Sample[]> {
+  const url = `${api}/hospital/history?deviceId=${encodeURIComponent(deviceId)}&from=${to - HISTORY_MS}&to=${to}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`history: HTTP ${res.status}`);
+  const { points } = (await res.json()) as { points: HistoryPoint[] };
+  return points.map((p) => ({ coord: p.coord, levelId: p.levelId, time: p.ts }));
+}
+
+/**
+ * 轨迹回放：一个人 60 分钟的轨迹、停留点和途中报警。
+ * 浏览器模拟时回放模拟出的前 60 分钟；连后端时回放这个人真实的最近 60 分钟，取不到时退回模拟。
+ */
 export function TrailPage({ query }: HospitalPageProps) {
   const t = useT();
+  const api = useMemo(() => backendApi(query), [query]);
+  const [source, setSource] = useState<'live' | 'sim'>(api ? 'live' : 'sim');
   const stageRef = useRef<HTMLDivElement>(null);
   const [page, load] = useMapPage(stageRef, {
     demo: 'trail',
@@ -50,10 +76,38 @@ export function TrailPage({ query }: HospitalPageProps) {
   const people = useMemo(() => new Map(listed.map((p) => [p.id, p])), [listed]);
   const trail = page?.indoor.plugins.trail;
 
-  // 在主线程分批模拟，每批之间让出主线程，页面不会卡住
+  const initial = query.get('tag');
+  const [personId, setPersonId] = useState(initial);
+  const person: Person | undefined = people.get(personId ?? '') ?? listed[0];
+
+  /** 轨迹和它的结束时间：模拟是第 60 分钟，后端是取数据的时刻 */
   const [histories, setHistories] = useState<Map<string, Sample[]> | null>(null);
+  const [end, setEnd] = useState(HISTORY_MS);
+  // 后端：换人时取这个人的轨迹，失败就整页退回模拟
   useEffect(() => {
-    if (!page) return;
+    if (!page || !person || source !== 'live' || !api) return;
+    let disposed = false;
+    const to = Date.now();
+    fetchHistory(api, person.id, to).then(
+      (samples) => {
+        if (disposed) return;
+        setEnd(to);
+        setHistories(new Map([[person.id, samples]]));
+      },
+      () => {
+        if (disposed) return;
+        setHistories(null);
+        setSource('sim');
+      },
+    );
+    return () => {
+      disposed = true;
+    };
+  }, [page, person, source, api]);
+
+  // 模拟：在主线程分批模拟，每批之间让出主线程，页面不会卡住
+  useEffect(() => {
+    if (!page || source !== 'sim') return;
     let disposed = false;
     void (async () => {
       const all = new Map<string, Sample[]>(listed.map((p) => [p.id, []]));
@@ -68,16 +122,14 @@ export function TrailPage({ query }: HospitalPageProps) {
         await new Promise((resolve) => setTimeout(resolve));
         if (disposed) return;
       }
+      setEnd(HISTORY_MS);
       setHistories(all);
     })();
     return () => {
       disposed = true;
     };
-  }, [page, listed]);
-
-  const initial = query.get('tag');
-  const [personId, setPersonId] = useState(initial);
-  const person: Person | undefined = people.get(personId ?? '') ?? listed[0];
+  }, [page, listed, source]);
+  const clock = source === 'live' ? wallClock : dayTime;
   const [range, setRange] = useState(60);
   const [speed, setSpeed] = useState(4);
   const [playing, setPlaying] = useState(false);
@@ -95,9 +147,9 @@ export function TrailPage({ query }: HospitalPageProps) {
 
   // 换人或换时间范围时重新装入轨迹，并把这个人的轨迹交给两层报警引擎重放一遍
   useEffect(() => {
-    if (!page || !trail || !histories || !person) return;
-    const all = histories.get(person.id)!;
-    const from = HISTORY_MS - range * 60_000;
+    const all = person && histories?.get(person.id);
+    if (!page || !trail || !all || !person) return;
+    const from = end - range * 60_000;
     trail.set(all.filter((s) => s.time >= from));
     const engine = createAlarmEngine({
       hospital: page.hospital,
@@ -116,7 +168,7 @@ export function TrailPage({ query }: HospitalPageProps) {
     const head = trail.position();
     if (head && head.levelId !== page.floor.current().id) page.floor.set(head.levelId);
     setTime(trail.time());
-  }, [page, trail, histories, person, range]);
+  }, [page, trail, histories, person, range, end]);
 
   // 轨迹装入后才算就绪
   useEffect(() => {
@@ -157,13 +209,33 @@ export function TrailPage({ query }: HospitalPageProps) {
     hooks.trailHeadFloor = () => floorName(floor, trail.position()!.levelId);
   }, [page, trail, person]);
 
-  const loaded = Boolean(page && trail && histories && person);
-  const [start, end] = loaded ? trail!.range() : [0, 0];
+  // 数据源状态：轨迹是一次性取的，没有连接状态，只说数据来自哪边（R4-15）
+  const status: SourceStatus | null = api
+    ? {
+        mode: 'auto',
+        source,
+        state: source === 'live' ? 'open' : 'sim',
+        latencyMs: undefined,
+        replayed: 0,
+        dropped: 0,
+        offline: 0,
+        sourceOnline: undefined,
+      }
+    : null;
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  useEffect(() => {
+    if (page && api) page.hooks.liveStatus = () => statusRef.current!;
+  }, [page, api]);
+
+  const loaded = Boolean(page && trail && person && histories?.has(person.id));
+  const [start, stop] = loaded ? trail!.range() : [0, 0];
   const ctx = page && {
     venue: page.venue,
     index: page.index,
     floor: page.floor,
     locate: page.hospital.locate,
+    clock,
   };
   const jump = (to: number) => {
     seekTo(to);
@@ -188,6 +260,7 @@ export function TrailPage({ query }: HospitalPageProps) {
               history.replaceState(history.state, '', hospitalHref('trail', `tag=${id}`));
             }}
           />
+          <LiveStatusMetric status={status} />
           <RadioGroup
             name="range"
             label="trail.range"
@@ -234,7 +307,7 @@ export function TrailPage({ query }: HospitalPageProps) {
           data-testid="trail-play"
           aria-pressed={playing}
           onClick={() => {
-            if (!playing && trail && trail.time() >= end) seekTo(start);
+            if (!playing && trail && trail.time() >= stop) seekTo(start);
             setPlaying(!playing);
           }}
         >
@@ -244,13 +317,13 @@ export function TrailPage({ query }: HospitalPageProps) {
           type="range"
           data-testid="trail-seek"
           min={start}
-          max={end}
+          max={stop}
           step={1000}
           value={time}
           onChange={(e) => seekTo(Number(e.target.value))}
         />
         <span className="clock" data-testid="trail-clock">
-          {loaded ? formatClock(dayTime(time), true) : ''}
+          {loaded ? formatClock(clock(time), true) : ''}
         </span>
       </div>
     </MapPageLayout>

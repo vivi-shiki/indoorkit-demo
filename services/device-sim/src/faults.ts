@@ -6,6 +6,8 @@ export interface Outgoing {
   deviceId: string;
   topic: string;
   payload: string;
+  /** 默认 0（位置）；事件用 1 */
+  qos?: 0 | 1;
 }
 
 const rate = z.number().min(0).max(1);

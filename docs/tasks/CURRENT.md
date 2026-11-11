@@ -24,9 +24,16 @@ Requirements, tests and acceptance per requirement: docs/backend/R1..R6 (Chinese
 - Browser (`pnpm e2e:live`): tracking page live → fallback to the simulator when the gateway stops → back to live; restart bridged by resend; default page opens no socket.
 - Existing `pnpm build` and `pnpm e2e` keep passing; Pages keeps using the simulator.
 
+## R4 (2026-11-11)
+
+- Unit: protocol alarm frames and event reports; device-sim asset events; ingest events de-duplication and server/browser alarm parity; gateway API parsing, REST handler (400 with field, 404, CORS, `ALARM_WRITES=session`), snapshot alarms and alarm frames under backpressure; playground kind filtering, alarm forwarding and REST address.
+- Integration: `services/test/history.spec.ts` (ordered track in range, asset track, 400 over an hour, empty for unknown) and `alarms.spec.ts` (open list newest first and in the snapshot; alarms raised around ingest and gateway restarts all reach the client and match MongoDB; ack/resolve change state, push frames and leave the open list).
+- Browser: `e2e-live/hospital-live.spec.ts` (assets, occupancy, trail and alerts in live mode).
+
 # PROPOSALS
 
 - No.1 Compose stack with MQTT → ingest → Redis Streams → WebSocket gateway, browser switching provider [CONFIRMED]
+- No.2 R4: MongoDB history, alarms computed in ingest, REST in the gateway, five hospital pages on the backend [CONFIRMED]
 
 ## No.1 Compose stack with MQTT → ingest → Redis Streams → WebSocket gateway, browser switching provider
 
@@ -40,3 +47,17 @@ See ADR 0008. Frames carry the Redis Stream id as their sequence number so the g
 - `pnpm verify` 482 tests, `pnpm backend:test` 11/11, `pnpm e2e:live` 3/3.
 - Shell-style env prefixes in scripts would break on Windows (Vivi's machine), so `dev:live` uses `vite --mode live` and `e2e:live` a separate Playwright config.
 - The arm64 image (R1-09) cannot be built in this sandbox (no QEMU); it is a pure-JS bundle on a multi-arch base image and is verified by the arm64 CI build in R6.
+
+## No.2 R4: MongoDB history, alarms computed in ingest, REST in the gateway, five hospital pages on the backend
+
+### CODE CHANGE
+
+- Preset fences moved to `domains/hospital` (`presetFences`) so ingest and the alerts page share them; ingest imports `@indoorkit/plugins/venue-index` only (new SDK subpath export, IndoorKit d381358).
+- ingest writes telemetry (time series, 7-day TTL), alarms and events to MongoDB, keeps open alarms in `ik:{site}:alarms:open` and appends `alarm` frames. Alarm ids carry a per-start prefix.
+- gateway: snapshot carries up to 200 open alarms; `/api/{site}/history`, `/alarms`, `/alarms/{id}/ack|resolve`; the only write is the alarm state (ADR 0008).
+- Playground: `createHospitalSource` filters backend batches by kind; alerts page takes server alarms in live mode and computes locally only on fallback; trail page fetches the last hour from `/history` and falls back to the simulation; every page shows the source status.
+
+### CONFIRMED
+
+- The integration test for asset history found that device-sim never passed `ASSETS` to the simulation, so the backend had no assets. Fixed; the R2 snapshot test now expects people plus assets.
+- `pnpm verify` 516 tests, `pnpm backend:test` 19/19, `pnpm e2e:live` 7/7.

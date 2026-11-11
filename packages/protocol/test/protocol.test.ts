@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   compareSeq,
   parseClientFrame,
+  parseEventReport,
   parsePositionReport,
   parseServerFrame,
   parseTopic,
@@ -71,6 +72,22 @@ describe('R1-03 device reports', () => {
   });
 });
 
+describe('R4-03 device events', () => {
+  it('accepts an event with an id and rejects one without', () => {
+    expect(parsePositionReport('{}').ok).toBe(false);
+    const ok = parseEventReport(
+      JSON.stringify({ id: 'A0001:offline:5', ts: 5, type: 'status', status: 'offline' }),
+    );
+    expect(ok.ok).toBe(true);
+    const bad = parseEventReport(JSON.stringify({ ts: 5, type: 'status', status: 'offline' }));
+    expect(!bad.ok && bad.error).toMatch(/id/);
+  });
+
+  it('builds event topics', () => {
+    expect(topic('hospital', 'event', 'A0001')).toBe('ik/v1/hospital/event/A0001');
+  });
+});
+
 describe('R1-03 WebSocket frames', () => {
   it('round-trips every server frame type', () => {
     const frames: ServerFrame[] = [
@@ -92,6 +109,14 @@ describe('R1-03 WebSocket frames', () => {
       },
       { type: 'device', site: 'hospital', seq: '12-0', time: 7, online: ['b'], offline: [] },
       { type: 'source', site: 'hospital', seq: '13-0', time: 8, online: false },
+      {
+        type: 'alarm',
+        site: 'hospital',
+        seq: '13-1',
+        time: 8,
+        alarm: { id: 'alarm-1', time: 8, level: 'high', state: 'open', subjectId: 'P0001', layer: 'fence' },
+      },
+      { type: 'alarm-state', site: 'hospital', seq: '13-2', time: 9, id: 'alarm-1', state: 'acknowledged' },
       { type: 'synced', site: 'hospital', seq: '13-0', replayed: 2 },
       { type: 'positions', site: 'hospital', seq: '14-0', time: 9, positions: [], replay: true },
       { type: 'ping', t: 9, rttMs: 12 },

@@ -115,6 +115,37 @@ describe('R2-10 dispose', () => {
   });
 });
 
+describe('R4-07, R4-13 alarms', () => {
+  it('passes on the open alarms of the snapshot, new alarms and state changes', async () => {
+    const { p } = make();
+    const events: unknown[] = [];
+    p.onAlarm((e) => events.push(e));
+    await p.start();
+    const ws = FakeSocket.last();
+    ws.open();
+    const a1 = { id: 'a1', time: 1, level: 'high', state: 'open' as const, subjectId: 'P0001' };
+    const a2 = { id: 'a2', time: 2, level: 'low', state: 'open' as const };
+    ws.push({
+      type: 'snapshot',
+      site: 'hospital',
+      seq: '1-0',
+      time: 1,
+      positions: [],
+      offline: [],
+      alarms: [a1],
+    });
+    ws.push({ type: 'alarm', site: 'hospital', seq: '2-0', time: 2, alarm: a2 });
+    ws.push({ type: 'alarm-state', site: 'hospital', seq: '3-0', time: 3, id: 'a1', state: 'acknowledged' });
+    ws.push({ type: 'alarm', site: 'hospital', seq: '2-0', time: 2, alarm: a2 });
+    expect(events).toEqual([
+      { type: 'reset', alarms: [a1] },
+      { type: 'raise', alarm: a2 },
+      { type: 'state', id: 'a1', state: 'acknowledged' },
+    ]);
+    p.dispose();
+  });
+});
+
 describe('status listeners', () => {
   it('notifies on every state change and can be unsubscribed', async () => {
     const { p } = make();

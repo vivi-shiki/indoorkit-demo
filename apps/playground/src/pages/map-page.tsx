@@ -3,6 +3,7 @@ import type { Hospital, HospitalVenue } from '@indoorkit/hospital';
 import { pickLabel } from '@indoorkit/imdf';
 import type { FloorApi, VenueIndex, ZoneApi } from '@indoorkit/plugins';
 import { type ReactNode, type RefObject, useEffect, useReducer, useRef, useState } from 'react';
+import type { SourceStatus, SwitchingProvider } from '../adapters/live-source';
 import { loadVenue, placesOf } from '../adapters/venue';
 import { createTrackedMap, FloorButtons, fitToStage, followAppSettings } from '../app/map';
 import { trackTeardown } from '../app/teardown';
@@ -195,3 +196,22 @@ export const floorName = (floor: FloorApi, levelId: string) => {
   const level = floor.resolve(levelId);
   return level.shortName.en ?? level.id;
 };
+
+/**
+ * 页面数据源的状态（docs/backend/R2-13、R4-15），同时登记 liveStatus 测试钩子。
+ * 地图销毁时数据源随插件一起释放，监听也随之清掉。
+ */
+export function useSourceStatus(
+  page: MapPage<readonly AnyPlugin[]> | null,
+  source: RefObject<SwitchingProvider | null>,
+): SourceStatus | null {
+  const [status, setStatus] = useState<SourceStatus | null>(null);
+  useEffect(() => {
+    const p = source.current;
+    if (!page || !p) return;
+    setStatus(p.status());
+    page.hooks.liveStatus = () => p.status();
+    return p.onStatus(setStatus);
+  }, [page, source]);
+  return status;
+}

@@ -1,4 +1,4 @@
-import { parsePositionReport, parseTopic, SIM_SOURCE_ID, topic } from '@indoorkit/protocol';
+import { parseEventReport, parsePositionReport, parseTopic, SIM_SOURCE_ID, topic } from '@indoorkit/protocol';
 import { describe, expect, it } from 'vitest';
 import { createHospitalDevices, HOSPITAL_VENUE, sourceWill } from '../src/devices';
 
@@ -25,6 +25,32 @@ describe('R2-01..02 hospital devices', () => {
     const b = createHospitalDevices(HOSPITAL_VENUE, { seed: 'playground', tags: 5, now: () => 0 }).tick(1000);
     expect(a.map((m) => m.deviceId)).toEqual(b.map((m) => m.deviceId));
     expect(a.map((m) => m.payload)).toEqual(b.map((m) => m.payload));
+  });
+});
+
+describe('R4-01, R4-03 assets and status events', () => {
+  it('reports assets with their status and an event, once, when a status changes', () => {
+    const devices = createHospitalDevices(HOSPITAL_VENUE, {
+      seed: 'playground',
+      tags: 5,
+      assets: 30,
+      now: () => 0,
+    });
+    const first = devices.tick(1000);
+    const assets = first.filter((m) => m.deviceId.startsWith('A') && m.topic.includes('/pos/'));
+    expect(assets).toHaveLength(30);
+    expect(assets.every((m) => typeof JSON.parse(m.payload).status === 'string')).toBe(true);
+    expect(first.some((m) => m.topic.includes('/event/'))).toBe(false);
+    const events = [];
+    // 一天里设备状态会变；推进 3 小时内一定能看到事件
+    for (let i = 0; i < 3 * 3600 && events.length === 0; i++) {
+      events.push(...devices.tick(1000).filter((m) => m.topic.includes('/event/')));
+    }
+    const e = events[0]!;
+    expect(e.qos).toBe(1);
+    expect(parseTopic(e.topic)).toMatchObject({ ok: true, value: { kind: 'event' } });
+    const r = parseEventReport(e.payload);
+    expect(r.ok && r.value.id).toMatch(new RegExp(`^${e.deviceId}:`));
   });
 });
 

@@ -59,6 +59,8 @@ export interface ViviTestHooks {
   // 禁入区域告警
   fenceIds(): string[];
   alertCount(): number;
+  /** 全部告警的 id，按时间先后；后端算的带每次启动不同的前缀（docs/backend/R4-13） */
+  alarmIds(): string[];
   alarmLayers(): string[];
   alarmState(id: string): 'open' | 'acknowledged' | 'resolved';
   unhandledCount(): number;
@@ -132,6 +134,7 @@ export function setHooks(partial: Partial<ViviTestHooks> & Pick<ViviTestHooks, '
     clusterCount: unavailable,
     fenceIds: unavailable,
     alertCount: unavailable,
+    alarmIds: unavailable,
     heatWindow: unavailable,
     heatPointCount: unavailable,
     heatLevelIds: unavailable,

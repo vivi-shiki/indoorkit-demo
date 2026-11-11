@@ -3,6 +3,8 @@
  * 内含重连、断点续传、心跳和序号去重（docs/backend/R2、R3）。不依赖 React 和地图。
  */
 import {
+  type AlarmRecord,
+  type AlarmState,
   compareSeq,
   parseServerFrame,
   type ServerFrame,
@@ -44,9 +46,16 @@ export interface LiveStatus {
   sourceOnline: boolean | undefined;
 }
 
+/** 告警的变化：新告警、状态变化；快照时整体替换为当前未处理的告警（docs/backend/R4） */
+export type AlarmEvent =
+  | { type: 'raise'; alarm: AlarmRecord }
+  | { type: 'state'; id: string; state: AlarmState }
+  | { type: 'reset'; alarms: AlarmRecord[] };
+
 export interface LiveProvider extends DataProvider {
   status(): LiveStatus;
   onStatus(listener: (status: LiveStatus) => void): () => void;
+  onAlarm(listener: (event: AlarmEvent) => void): () => void;
 }
 
 export interface LiveOptions {
@@ -77,6 +86,10 @@ export function createLiveProvider(options: LiveOptions): LiveProvider {
   const connectTimeoutMs = options.connectTimeoutMs ?? 10_000;
   const listeners = new Set<(batch: PositionBatch) => void>();
   const statusListeners = new Set<(status: LiveStatus) => void>();
+  const alarmListeners = new Set<(event: AlarmEvent) => void>();
+  const emitAlarm = (event: AlarmEvent) => {
+    for (const l of [...alarmListeners]) l(event);
+  };
 
   let started = false;
   let disposed = false;
@@ -174,6 +187,7 @@ export function createLiveProvider(options: LiveOptions): LiveProvider {
         if (frame.source !== undefined) status.sourceOnline = frame.source;
         status.snapshots++;
         emit(frame.time, frame.positions);
+        if (frame.alarms) emitAlarm({ type: 'reset', alarms: frame.alarms });
         synced();
         notify();
         return;
@@ -189,6 +203,8 @@ export function createLiveProvider(options: LiveOptions): LiveProvider {
     }
     lastSeq = frame.seq;
     if (frame.type === 'positions') emit(frame.time, frame.positions);
+    else if (frame.type === 'alarm') emitAlarm({ type: 'raise', alarm: frame.alarm });
+    else if (frame.type === 'alarm-state') emitAlarm({ type: 'state', id: frame.id, state: frame.state });
     else if (frame.type === 'device') {
       for (const id of frame.online) offline.delete(id);
       for (const id of frame.offline) offline.add(id);
@@ -255,6 +271,10 @@ export function createLiveProvider(options: LiveOptions): LiveProvider {
       statusListeners.add(listener);
       return () => statusListeners.delete(listener);
     },
+    onAlarm(listener) {
+      alarmListeners.add(listener);
+      return () => alarmListeners.delete(listener);
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
@@ -263,6 +283,7 @@ export function createLiveProvider(options: LiveOptions): LiveProvider {
       closeSocket();
       listeners.clear();
       statusListeners.clear();
+      alarmListeners.clear();
     },
   };
 }

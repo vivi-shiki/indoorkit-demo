@@ -1,4 +1,4 @@
-import type { ServerFrame, Site, TagState } from '@indoorkit/protocol';
+import type { AlarmRecord, ServerFrame, Site, TagState } from '@indoorkit/protocol';
 
 /** 带序号的帧：Stream 里读出来的条目 */
 export type SeqFrame = Extract<ServerFrame, { seq: string; time: number }>;
@@ -7,7 +7,16 @@ export type SeqFrame = Extract<ServerFrame, { seq: string; time: number }>;
 export interface FrameStore {
   /** Stream 里最后一帧的序号；还没有帧时为 null */
   lastSeq(site: Site): Promise<string | null>;
-  snapshot(site: Site): Promise<{ positions: TagState[]; offline: string[]; source: boolean | undefined }>;
+  /** alarms：未处理的告警，按时间排序，最多 SNAPSHOT_ALARMS 条（R4-07） */
+  snapshot(site: Site): Promise<{
+    positions: TagState[];
+    offline: string[];
+    source: boolean | undefined;
+    alarms: AlarmRecord[];
+  }>;
   /** after 之后的所有帧；after 之后的帧已经被裁掉时返回 'gone' */
   range(site: Site, after: string): Promise<SeqFrame[] | 'gone'>;
 }
+
+/** 快照里最多带的未处理告警数（R4-07） */
+export const SNAPSHOT_ALARMS = 200;

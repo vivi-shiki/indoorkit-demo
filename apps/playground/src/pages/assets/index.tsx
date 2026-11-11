@@ -2,38 +2,53 @@ import { ASSET_TYPES, DAY_START_MS, dayTime } from '@indoorkit/hospital';
 import { floorPlugin, positionStreamPlugin, unitClusterPlugin, zonePlugin } from '@indoorkit/plugins';
 import type { TagPosition } from '@indoorkit/rtls';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createRoster, createSimProvider, SIM_INTERVAL_MS } from '../../adapters/sim';
+import { createHospitalSource, LIVE_ASSETS } from '../../adapters/live';
+import type { SwitchingProvider } from '../../adapters/live-source';
+import { createRoster, SIM_INTERVAL_MS } from '../../adapters/sim';
 import { placesOf } from '../../adapters/venue';
+import type { HospitalPageProps } from '../../app/routes';
 import { useT } from '../../app-i18n';
 import { ASSET_STATUSES, STATUS_COLORS, STATUS_ORDER } from '../../presentation/colors';
 import { placeText } from '../../presentation/format';
+import { LiveStatusMetric } from '../../presentation/live-status';
 import { ChipGroup } from '../../presentation/ui';
-import { floorName, MapPageLayout, useMapEvent, useMapPage, useRefresh } from '../map-page';
+import { floorName, MapPageLayout, useMapEvent, useMapPage, useRefresh, useSourceStatus } from '../map-page';
 import { AssetDetail, DepartmentList, SearchResults, UnitDrawer } from './view';
 
-const ASSETS = 400;
+/** 浏览器模拟和后端都是 400 台（docs/backend/R4-12） */
+const ASSETS = LIVE_ASSETS;
 const NONE: ReadonlySet<string> = new Set();
 
 /** 设备分布总览：按区块聚合设备，按科室、状态、类型筛选，查看区块和设备详情 */
-export function AssetsPage() {
+export function AssetsPage({ query: pageQuery }: HospitalPageProps) {
   const t = useT();
   const stageRef = useRef<HTMLDivElement>(null);
+  const source = useRef<SwitchingProvider | null>(null);
   const [page, load] = useMapPage(stageRef, {
     demo: 'assets',
     readyWhen: 'first-positions',
-    plugins: (venue) =>
-      [
+    plugins: (venue) => {
+      source.current = createHospitalSource(venue, {
+        query: pageQuery,
+        kinds: ['asset'],
+        people: 0,
+        assets: ASSETS,
+        seed: 'assets',
+      });
+      return [
         floorPlugin,
         zonePlugin({ zones: placesOf(venue).hospital.zones() }),
         unitClusterPlugin({ statusOrder: STATUS_ORDER, statusColors: STATUS_COLORS }),
         // 设备用区块聚合点显示，不画逐个移动的圆点
         positionStreamPlugin({
-          provider: createSimProvider(venue, { people: 0, assets: ASSETS, seed: 'assets' }),
+          provider: source.current,
           intervalMs: SIM_INTERVAL_MS,
           visible: false,
         }),
-      ] as const,
+      ] as const;
+    },
   });
+  const liveStatus = useSourceStatus(page, source);
   const assets = useMemo(
     () =>
       page
@@ -265,6 +280,7 @@ export function AssetsPage() {
       load={load}
       controls={
         <>
+          <LiveStatusMetric status={liveStatus} />
           <span className="metric">
             {t('metric.assets')}: <b data-testid="asset-count">{metrics.assets}</b>
           </span>

@@ -61,6 +61,7 @@ services:
     environment:
       MQTT_URL: mqtt://mosquitto:1883
       REDIS_URL: redis://redis:6379
+      MONGO_URL: mongodb://mongo:27017
       HTTP_PORT: "8082"
     depends_on:
       mosquitto: { condition: service_healthy }
@@ -78,11 +79,13 @@ services:
     image: indoorkit/gateway:dev
     environment:
       REDIS_URL: redis://redis:6379
+      MONGO_URL: mongodb://mongo:27017
       PORT: "8080"
     ports:
       - "8080:8080"
     depends_on:
       redis: { condition: service_healthy }
+      mongo: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 5s

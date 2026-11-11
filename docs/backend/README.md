@@ -22,7 +22,7 @@ device-sim ──MQTT──▶ Mosquitto ──▶ ingest ──▶ Redis（现�
 | [R1](R1-contract-and-skeleton.md) | 消息契约与服务骨架，`docker compose up` 全部健康 | 完成 |
 | [R2](R2-hospital-position-stream.md) | 医院人员位置走后端链路，前端自动选择数据源并显示连接状态 | 完成 |
 | [R3](R3-reliability.md) | 可靠性：序号、去重、断线续传、心跳、背压、设备离线、故障注入 | 完成 |
-| [R4](R4-storage-and-alarms.md) | MongoDB 历史、服务端告警、REST 查询，医院五个页面都能连后端 | 开发中 |
+| [R4](R4-storage-and-alarms.md) | MongoDB 历史、服务端告警、REST 查询，医院五个页面都能连后端 | 完成 |
 | [R5](R5-parking-and-museum.md) | 停车场和博物馆接入后端 | 待开发 |
 | [R6](R6-k3s-on-oracle.md) | k3s 清单、本地集群验证、Oracle 免费机部署手册 | 待开发 |
 

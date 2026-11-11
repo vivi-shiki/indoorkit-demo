@@ -1,4 +1,4 @@
-import type { ServerFrame, Site, StreamFrame, TagState } from '@indoorkit/protocol';
+import type { AlarmRecord, ServerFrame, Site, StreamFrame, TagState } from '@indoorkit/protocol';
 import type { SocketLike } from '../src/session';
 import type { FrameStore, SeqFrame } from '../src/store';
 
@@ -8,30 +8,41 @@ export function fakeStore(keep = 300) {
   const frames: SeqFrame[] = [];
   const state = new Map<string, TagState>();
   const offline = new Set<string>();
-  const store: FrameStore & { push(f: StreamFrame): SeqFrame; state: typeof state; offline: typeof offline } =
-    {
-      state,
-      offline,
-      push(f) {
-        n++;
-        const frame = { ...f, seq: `${n}-0` } as SeqFrame;
-        frames.push(frame);
-        if (frames.length > keep) frames.shift();
-        if (frame.type === 'positions') for (const p of frame.positions) state.set(p.id, p);
-        return frame;
-      },
-      async lastSeq() {
-        return frames.at(-1)?.seq ?? null;
-      },
-      async snapshot(_site: Site) {
-        return { positions: [...state.values()], offline: [...offline], source: undefined };
-      },
-      async range(_site: Site, after: string) {
-        const i = frames.findIndex((f) => f.seq === after);
-        if (i < 0) return 'gone';
-        return frames.slice(i + 1);
-      },
-    };
+  const alarms: AlarmRecord[] = [];
+  const store: FrameStore & {
+    push(f: StreamFrame): SeqFrame;
+    state: typeof state;
+    offline: typeof offline;
+    alarms: typeof alarms;
+  } = {
+    state,
+    offline,
+    alarms,
+    push(f) {
+      n++;
+      const frame = { ...f, seq: `${n}-0` } as SeqFrame;
+      frames.push(frame);
+      if (frames.length > keep) frames.shift();
+      if (frame.type === 'positions') for (const p of frame.positions) state.set(p.id, p);
+      return frame;
+    },
+    async lastSeq() {
+      return frames.at(-1)?.seq ?? null;
+    },
+    async snapshot(_site: Site) {
+      return {
+        positions: [...state.values()],
+        offline: [...offline],
+        source: undefined,
+        alarms: [...alarms],
+      };
+    },
+    async range(_site: Site, after: string) {
+      const i = frames.findIndex((f) => f.seq === after);
+      if (i < 0) return 'gone';
+      return frames.slice(i + 1);
+    },
+  };
   return store;
 }
 

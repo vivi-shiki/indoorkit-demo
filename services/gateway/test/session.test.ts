@@ -112,3 +112,31 @@ describe('R3-10 shutdown', () => {
     expect(socket.closed).toEqual({ code: 1001, reason: 'restart' });
   });
 });
+
+describe('R4 alarms', () => {
+  const alarm = (id: string, time: number) => ({ id, time, level: 'high' as const, state: 'open' as const });
+
+  it('R4-07 the snapshot carries the open alarms', async () => {
+    const { store, socket, session } = setup();
+    store.alarms.push(alarm('x-1', 5));
+    await session.receive(subscribe());
+    expect(socket.sent[1]).toMatchObject({ type: 'snapshot', alarms: [alarm('x-1', 5)] });
+  });
+
+  it('R4-07 leaves alarms out of the snapshot when there are none', async () => {
+    const { socket, session } = setup();
+    await session.receive(subscribe());
+    expect(socket.sent[1]).not.toHaveProperty('alarms');
+  });
+
+  it('R4-06 alarm frames are sent even while position frames are being skipped', async () => {
+    const { store, socket, session } = setup();
+    await session.receive(subscribe());
+    socket.setBuffered(5000);
+    session.deliver(store.push({ type: 'positions', site: 'hospital', time: 1, positions: [tag('a')] }));
+    const a = store.push({ type: 'alarm', site: 'hospital', time: 1, alarm: alarm('x-2', 1) });
+    session.deliver(a);
+    expect(socket.sent.at(-1)).toEqual(a);
+    expect(session.stats().skipped).toBe(1);
+  });
+});

@@ -1,4 +1,5 @@
 import { createLiveProvider, type LiveState } from '@indoorkit/live-client';
+import { HOSPITAL_ASSETS, HOSPITAL_TAGS } from '@indoorkit/protocol';
 import type { PositionBatch } from '@indoorkit/rtls';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { compose, GATEWAY, inside, rawClient, WS_URL, waitFor } from './helpers';
@@ -22,7 +23,7 @@ describe('R2 hospital positions through the whole chain', () => {
       6000,
     );
     const snap = c.frames.find((f) => f.type === 'snapshot');
-    expect(snap?.type === 'snapshot' && snap.positions.length).toBe(2000);
+    expect(snap?.type === 'snapshot' && snap.positions.length).toBe(HOSPITAL_TAGS + HOSPITAL_ASSETS);
     expect(c.frames[0]?.type).toBe('hello');
   });
 });

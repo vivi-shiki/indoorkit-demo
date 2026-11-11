@@ -1,4 +1,4 @@
-import { type Alarm, dayTime } from '@indoorkit/hospital';
+import type { Alarm } from '@indoorkit/hospital';
 import { useT } from '../../app-i18n';
 import { formatClock } from '../../presentation/format';
 
@@ -7,7 +7,8 @@ export type AlarmState = 'open' | 'acknowledged' | 'resolved';
 /** 告警列表的一项：级别、类型、对象、地点和处理按钮 */
 export function AlarmItem(props: {
   alarm: Alarm;
-  text: { floor: string; kind: string; subject: string; place: string };
+  /** clock：告警时刻（一天里的毫秒数） */
+  text: { floor: string; kind: string; subject: string; place: string; clock: number };
   state: AlarmState;
   onAction: (action: 'ack' | 'resolve' | 'locate') => void;
 }) {
@@ -27,7 +28,7 @@ export function AlarmItem(props: {
         <span className="tag" data-testid="alarm-layer">
           {t(`layer.${a.layer}`)}
         </span>
-        <span className="muted">{formatClock(dayTime(a.time), true)}</span>
+        <span className="muted">{formatClock(text.clock, true)}</span>
       </div>
       <button
         type="button"

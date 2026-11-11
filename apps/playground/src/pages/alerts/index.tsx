@@ -1,4 +1,4 @@
-import { type Alarm, DEPARTMENT_RULES, type FenceRule, subjectsOf } from '@indoorkit/hospital';
+import { type Alarm, DEPARTMENT_RULES, dayTime, presetFences, subjectsOf } from '@indoorkit/hospital';
 import {
   floorPlugin,
   polygonPlugin,
@@ -6,84 +6,54 @@ import {
   positionStreamPlugin,
   zonePlugin,
 } from '@indoorkit/plugins';
-import { useEffect, useEffectEvent, useMemo, useReducer, useRef, useState } from 'react';
+import type { AlarmRecord } from '@indoorkit/protocol';
+import { useCallback, useEffect, useEffectEvent, useMemo, useReducer, useRef, useState } from 'react';
 import { hospitalAlarmPlugin } from '../../adapters/alarm';
-import { createRoster, createSimProvider, SIM_INTERVAL_MS } from '../../adapters/sim';
+import { backendApi, createHospitalSource, LIVE_ASSETS, LIVE_PEOPLE, usesBackend } from '../../adapters/live';
+import type { SwitchingProvider } from '../../adapters/live-source';
+import { createRoster, SIM_INTERVAL_MS } from '../../adapters/sim';
 import { placesOf } from '../../adapters/venue';
+import type { HospitalPageProps } from '../../app/routes';
 import { i18n, useT } from '../../app-i18n';
 import type { MessageKey } from '../../i18n';
 import { roleColor } from '../../presentation/colors';
 import { assetName, personName, placeText } from '../../presentation/format';
+import { LiveStatusMetric } from '../../presentation/live-status';
 import { ChipGroup } from '../../presentation/ui';
-import { floorName, type MapPage, MapPageLayout, useMapEvent, useMapPage } from '../map-page';
+import { floorName, MapPageLayout, useMapEvent, useMapPage, useSourceStatus } from '../map-page';
 import { AlarmItem, type AlarmState } from './view';
 
-const PEOPLE = 600;
-const ASSETS = 200;
+/** 浏览器模拟的对象数；后端模式下是后端的那一批（docs/backend/R4-12） */
+const SIM_PEOPLE = 600;
+const SIM_ASSETS = 200;
 /** 列表只显示最新的这么多条；已确认、处理中的始终显示 */
 const MAX_SHOWN = 50;
 const LAYERS = ['department', 'fence', 'status'] as const;
 const NONE: ReadonlySet<string> = new Set();
 
-type Fence = Omit<FenceRule, 'levelId' | 'label'> & { key: MessageKey; floor: string; color: string };
+/** 浏览器引擎的告警 id 是 alarm-N；后端的带每次启动不同的前缀（docs/backend/R4-05） */
+const fromServer = (a: Alarm) => !a.id.startsWith('alarm-');
+/** 告警时刻 → 一天里的毫秒数：后端是真实时间，模拟从 9:00 起算 */
+const clockOf = (a: Alarm) =>
+  fromServer(a) ? a.time - new Date(a.time).setHours(0, 0, 0, 0) : dayTime(a.time);
 
-/** 第二层：自定义围栏，画在 ICU、1 层大厅和 401 病房 */
-function presetFences({
-  venue,
-  floor,
-  hospital,
-}: Pick<MapPage<[]>, 'venue' | 'floor' | 'hospital'>): Fence[] {
-  const unitOn = (floorRef: string, name: string, pick: 'middle' | 'first' = 'first') => {
-    const levelId = floor.resolve(floorRef).id;
-    const found = venue.features.units.features.filter(
-      (u) =>
-        u.properties.level_id === levelId &&
-        (u.properties.label_en === name || u.properties.category === name),
-    );
-    const unit = found[pick === 'middle' ? Math.floor(found.length / 2) : 0];
-    if (!unit) throw new Error(`no ${name} on ${floorRef}`);
-    return (unit.geometry as GeoJSON.Polygon).coordinates[0] as [number, number][];
-  };
-  return [
-    {
-      id: 'icu-restricted',
-      key: 'fence.icu',
-      floor: '3F',
-      coordinates: unitOn('3F', 'ICU', 'middle'),
-      rule: 'forbid',
-      selector: { kinds: ['person'] },
-      exemptDepartments: [hospital.departmentByCode('icu').id],
-      level: 'high',
-      color: '#dc2626',
-    },
-    {
-      id: 'exit-antitheft',
-      key: 'fence.exit',
-      floor: '1F',
-      coordinates: unitOn('1F', 'lobby'),
-      rule: 'forbid',
-      selector: { kinds: ['asset'] },
-      level: 'high',
-      color: '#ea580c',
-    },
-    {
-      id: 'ward-dwell',
-      key: 'fence.wardDwell',
-      floor: '4F',
-      coordinates: unitOn('4F', 'Patient room 401'),
-      rule: 'dwell',
-      dwellMs: 120_000,
-      selector: { roles: ['visitor'] },
-      level: 'medium',
-      color: '#9333ea',
-    },
-  ];
-}
+/** 预设围栏在地图上的颜色；围栏本身定义在 @indoorkit/hospital，服务端也用它（docs/backend/R4-04） */
+const FENCE_COLORS: Record<string, string> = {
+  'icu-restricted': '#dc2626',
+  'exit-antitheft': '#ea580c',
+  'ward-dwell': '#9333ea',
+};
 
 /** 禁入区域告警：科室范围、自定义围栏和设备状态三类告警的实时列表与处理 */
-export function AlertsPage() {
+export function AlertsPage({ query }: HospitalPageProps) {
   const t = useT();
+  const backend = usesBackend(query);
+  const counts = backend
+    ? { people: LIVE_PEOPLE, assets: LIVE_ASSETS }
+    : { people: SIM_PEOPLE, assets: SIM_ASSETS };
+  const api = useMemo(() => backendApi(query), [query]);
   const stageRef = useRef<HTMLDivElement>(null);
+  const source = useRef<SwitchingProvider | null>(null);
   // 设备用灰色画，人员按角色着色；名册在场馆加载后才有
   const roster = useRef<ReturnType<typeof createRoster> | null>(null);
   const [page, load] = useMapPage(stageRef, {
@@ -91,16 +61,28 @@ export function AlertsPage() {
     readyWhen: 'first-positions',
     floor: '3F',
     plugins: (venue) => {
-      roster.current = createRoster(venue, { people: PEOPLE, assets: ASSETS });
+      roster.current = createRoster(venue, counts);
+      const src = createHospitalSource(venue, {
+        query,
+        kinds: ['person', 'asset'],
+        ...counts,
+        seed: 'alerts',
+      });
+      source.current = src;
       const roles = new Map(roster.current.people.map((p) => [p.id, p.role]));
       return [
         floorPlugin,
         polygonPlugin,
         popupPlugin,
         zonePlugin({ zones: placesOf(venue).hospital.zones() }),
-        hospitalAlarmPlugin({ subjects: subjectsOf(roster.current), departmentRules: DEPARTMENT_RULES }),
+        hospitalAlarmPlugin({
+          subjects: subjectsOf(roster.current),
+          departmentRules: DEPARTMENT_RULES,
+          // 显示后端数据时告警由服务器算，浏览器只在退回模拟时自己算（R4-13）
+          local: () => src.status().source === 'sim',
+        }),
         positionStreamPlugin({
-          provider: createSimProvider(venue, { people: PEOPLE, assets: ASSETS, seed: 'alerts' }),
+          provider: src,
           intervalMs: SIM_INTERVAL_MS,
           decorate: (id) => ({ role: roles.get(id) ?? 'asset' }),
           circleColor: roleColor,
@@ -109,15 +91,49 @@ export function AlertsPage() {
     },
   });
   const alarm = page?.indoor.plugins.alarm;
+  const liveStatus = useSourceStatus(page, source);
   const people = useMemo(() => new Map((page ? roster.current!.people : []).map((p) => [p.id, p])), [page]);
   const assets = useMemo(() => new Map((page ? roster.current!.assets : []).map((a) => [a.id, a])), [page]);
 
-  const fences = useMemo(() => (page ? presetFences(page) : []), [page]);
+  const fences = useMemo(() => (page ? presetFences(page.venue, page.hospital) : []), [page]);
   useEffect(() => {
-    for (const { key, ...fence } of fences) alarm!.addFence({ ...fence, label: i18n.t(key) });
+    for (const { levelId, label, ...fence } of fences) {
+      alarm!.addFence({
+        ...fence,
+        label: i18n.t(label as MessageKey),
+        floor: levelId,
+        color: FENCE_COLORS[fence.id],
+      });
+    }
   }, [alarm, fences]);
 
   const [states, setStates] = useState(new Map<string, AlarmState>());
+  const updateStates = useCallback(
+    (entries: Iterable<[string, AlarmState]>) =>
+      setStates((prev) => {
+        const next = new Map(prev);
+        for (const [id, state] of entries) next.set(id, state);
+        return next;
+      }),
+    [],
+  );
+
+  // 后端的告警：新告警、快照里未处理的告警和别人确认、解决的状态（R4-13）
+  useEffect(() => {
+    const src = source.current;
+    if (!page || !alarm || !src) return;
+    const asAlarm = (r: AlarmRecord) => r as unknown as Alarm;
+    return src.onAlarm((e) => {
+      if (e.type === 'state') updateStates([[e.id, e.state]]);
+      else {
+        const records = e.type === 'raise' ? [e.alarm] : e.alarms;
+        alarm.add(records.map(asAlarm), { announce: e.type === 'raise' });
+        updateStates(records.filter((r) => r.state !== 'open').map((r) => [r.id, r.state]));
+        dirty.current = true;
+      }
+    });
+  }, [page, alarm, updateStates]);
+
   const stateOf = (id: string): AlarmState => states.get(id) ?? 'open';
   const [layers, setLayers] = useState(NONE);
 
@@ -129,7 +145,7 @@ export function AlertsPage() {
   };
   const kindText = (a: Alarm) => {
     const fence = a.fenceId ? fences.find((f) => f.id === a.fenceId) : undefined;
-    return fence ? `${t(`alarm.${a.kind}`)} · ${t(fence.key)}` : t(`alarm.${a.kind}`);
+    return fence ? `${t(`alarm.${a.kind}`)} · ${t(fence.label as MessageKey)}` : t(`alarm.${a.kind}`);
   };
 
   // 记住弹窗对应的告警，切换语言时用新语言重开
@@ -167,6 +183,7 @@ export function AlertsPage() {
     const { hooks } = page;
     hooks.fenceIds = () => alarm.fences().map((f) => f.id);
     hooks.alertCount = () => alarm.alarms().length;
+    hooks.alarmIds = () => alarm.alarms().map((a) => a.id);
     hooks.alarmLayers = () => [...new Set(alarm.alarms().map((a) => a.layer))].sort();
   }, [page, alarm]);
   useEffect(() => {
@@ -197,7 +214,14 @@ export function AlertsPage() {
         redraw();
         return;
       }
-      setStates(new Map(states).set(a.id, action === 'ack' ? 'acknowledged' : 'resolved'));
+      const state = action === 'ack' ? 'acknowledged' : 'resolved';
+      updateStates([[a.id, state]]);
+      // 后端的告警由后端改状态，再推给所有打开告警页的人（R4-10）
+      if (api && fromServer(a)) {
+        void fetch(`${api}/hospital/alarms/${encodeURIComponent(a.id)}/${action}`, { method: 'POST' }).catch(
+          () => {},
+        );
+      }
     };
     feed = shown.map((a) => (
       <AlarmItem
@@ -207,6 +231,7 @@ export function AlertsPage() {
           floor: floorName(floor, a.levelId),
           kind: kindText(a),
           subject: subjectName(a.subjectId),
+          clock: clockOf(a),
           place: `${floorName(floor, a.levelId)} · ${placeText(index, venue, a.unitId ? { unitId: a.unitId, departmentId: a.departmentId } : null)}`,
         }}
         state={stateOf(a.id)}
@@ -224,6 +249,7 @@ export function AlertsPage() {
       load={load}
       controls={
         <>
+          <LiveStatusMetric status={liveStatus} />
           <span className="metric">
             {t('metric.alerts')}: <b data-testid="alert-count">{alarm?.alarms().length ?? 0}</b>
           </span>

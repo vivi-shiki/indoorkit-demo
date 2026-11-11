@@ -59,6 +59,7 @@ export function createSession({ socket, store, now, limits }: SessionOptions) {
       offline: snap.offline,
     };
     if (snap.source !== undefined) frame.source = snap.source;
+    if (snap.alarms.length > 0) frame.alarms = snap.alarms;
     send(frame);
     cursor = seq;
     stats.snapshots++;

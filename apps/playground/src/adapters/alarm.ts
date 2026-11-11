@@ -30,6 +30,11 @@ export interface AlarmApi {
   /** 打开地图以来产生的全部报警，按时间先后 */
   alarms(): readonly Alarm[];
   check(batch: PositionBatch): Alarm[];
+  /**
+   * 加入别处（后端）算出的告警，已有的 id 跳过。announce 为 true 时广播 alarm:raise；
+   * 快照里补上的旧告警不广播。返回新加入的告警。
+   */
+  add(alarms: readonly Alarm[], options: { announce: boolean }): Alarm[];
 }
 
 /**
@@ -39,6 +44,8 @@ export interface AlarmApi {
 export function hospitalAlarmPlugin(options: {
   subjects: Iterable<AlarmSubject>;
   departmentRules: readonly DepartmentRule[];
+  /** 是否在浏览器里算告警；后端模式下告警来自服务器，返回 false（docs/backend/R4-13） */
+  local?: () => boolean;
 }) {
   return definePlugin({
     name: 'alarm',
@@ -52,10 +59,13 @@ export function hospitalAlarmPlugin(options: {
         departmentRules: options.departmentRules,
       });
       const raised: Alarm[] = [];
+      const known = new Set<string>();
       const check = (batch: PositionBatch) => {
+        if (options.local && !options.local()) return [];
         const alarms = engine.check(batch);
         for (const a of alarms) {
           raised.push(a);
+          known.add(a.id);
           ctx.events.emit('alarm:raise', a);
         }
         return alarms;
@@ -82,6 +92,16 @@ export function hospitalAlarmPlugin(options: {
         fences: engine.fences,
         alarms: () => raised,
         check,
+        add(alarms, { announce }) {
+          const fresh = alarms.filter((a) => !known.has(a.id));
+          for (const a of fresh) {
+            known.add(a.id);
+            raised.push(a);
+          }
+          if (fresh.length > 0 && !announce) raised.sort((a, b) => a.time - b.time);
+          if (announce) for (const a of fresh) ctx.events.emit('alarm:raise', a);
+          return fresh;
+        },
       };
     },
   });

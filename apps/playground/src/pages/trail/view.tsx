@@ -1,10 +1,4 @@
-import {
-  type Alarm,
-  dayTime,
-  type HospitalLocation,
-  type HospitalVenue,
-  type Person,
-} from '@indoorkit/hospital';
+import type { Alarm, HospitalLocation, HospitalVenue, Person } from '@indoorkit/hospital';
 import type { FloorApi, Stop, VenueIndex } from '@indoorkit/plugins';
 import { useT } from '../../app-i18n';
 import { ROLE_COLORS } from '../../presentation/colors';
@@ -25,6 +19,8 @@ export interface TrailViewContext {
   index: VenueIndex;
   floor: FloorApi;
   locate(levelId: string, coord: [number, number]): HospitalLocation | null;
+  /** 轨迹时间 → 一天里的毫秒数：模拟时从 9:00 起算，后端是真实时间 */
+  clock(time: number): number;
 }
 
 export function PersonSelect(props: {
@@ -91,7 +87,7 @@ export function StopList(props: {
           <li key={s.start}>
             <button type="button" className="row" data-testid="stop-row" onClick={() => props.onStop(s)}>
               <span className="name">
-                {formatClock(dayTime(s.start))} · {floorName(ctx.floor, s.levelId)}{' '}
+                {formatClock(ctx.clock(s.start))} · {floorName(ctx.floor, s.levelId)}{' '}
                 {placeText(ctx.index, ctx.venue, where)}
                 {outside && <span className="tag warn">{t('place.outsideOwn')}</span>}
               </span>
@@ -122,7 +118,7 @@ export function AlarmList(props: {
                 <span className={`level ${a.level}`}>{t(`level.${a.level}`)}</span> {t(`alarm.${a.kind}`)}
               </span>
               <span className="muted">
-                {formatClock(dayTime(a.time))} · {floorName(ctx.floor, a.levelId)}{' '}
+                {formatClock(ctx.clock(a.time))} · {floorName(ctx.floor, a.levelId)}{' '}
                 {placeText(
                   ctx.index,
                   ctx.venue,

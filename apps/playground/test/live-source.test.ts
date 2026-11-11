@@ -1,13 +1,14 @@
-import type { LiveProvider, LiveState, LiveStatus } from '@indoorkit/live-client';
+import type { AlarmEvent, LiveProvider, LiveState, LiveStatus } from '@indoorkit/live-client';
 import type { PositionBatch } from '@indoorkit/rtls';
 import { createManualProvider } from '@indoorkit/rtls/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSwitchingProvider, resolveSource } from '../src/adapters/live-source';
+import { apiBase, createSwitchingProvider, resolveSource } from '../src/adapters/live-source';
 
 /** 可以手动改状态、手动推批次的后端数据源 */
 function fakeLive() {
   const manual = createManualProvider();
   const listeners = new Set<(s: LiveStatus) => void>();
+  const alarmListeners = new Set<(e: AlarmEvent) => void>();
   let status: LiveStatus = {
     state: 'idle',
     latencyMs: undefined,
@@ -22,6 +23,7 @@ function fakeLive() {
   const live: LiveProvider & {
     set(state: LiveState): void;
     emit(b: PositionBatch): void;
+    alarm(e: AlarmEvent): void;
     readonly disposed: boolean;
     readonly started: boolean;
   } = {
@@ -41,6 +43,13 @@ function fakeLive() {
     onStatus(l) {
       listeners.add(l);
       return () => listeners.delete(l);
+    },
+    onAlarm(l) {
+      alarmListeners.add(l);
+      return () => alarmListeners.delete(l);
+    },
+    alarm(e) {
+      for (const l of [...alarmListeners]) l(e);
     },
     set(state) {
       status = { ...status, state };
@@ -155,5 +164,53 @@ describe('R2-12 automatic fallback', () => {
     expect(live.disposed).toBe(true);
     expect(sims[0]!.disposed).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('R4-12 objects of the page', () => {
+  it('passes only the backend positions the page asks for', async () => {
+    const live = fakeLive();
+    const p = createSwitchingProvider({
+      mode: 'live',
+      live,
+      createSim: () => createManualProvider(),
+      keep: (id) => id.startsWith('A'),
+    });
+    const got: PositionBatch[] = [];
+    p.subscribe((b) => got.push(b));
+    await p.start();
+    live.set('open');
+    live.emit({
+      time: 1,
+      positions: [
+        { id: 'P0001', levelId: 'L', coord: [0, 0] },
+        { id: 'A0001', levelId: 'L', coord: [0, 0] },
+      ],
+    });
+    expect(got).toEqual([{ time: 1, positions: [{ id: 'A0001', levelId: 'L', coord: [0, 0] }] }]);
+    p.dispose();
+  });
+});
+
+describe('R4-13 server alarms', () => {
+  it('forwards alarm events while the backend is shown', async () => {
+    const live = fakeLive();
+    const p = createSwitchingProvider({ mode: 'live', live, createSim: () => createManualProvider() });
+    const got: AlarmEvent[] = [];
+    p.onAlarm((e) => got.push(e));
+    await p.start();
+    live.set('open');
+    const e: AlarmEvent = { type: 'state', id: 'x', state: 'resolved' };
+    live.alarm(e);
+    expect(got).toEqual([e]);
+    p.dispose();
+    live.alarm(e);
+    expect(got).toHaveLength(1);
+  });
+
+  it('derives the REST address from the WebSocket address', () => {
+    expect(apiBase('ws://localhost:8080/ws')).toBe('http://localhost:8080/api');
+    expect(apiBase('wss://rtls.example.org/ws')).toBe('https://rtls.example.org/api');
+    expect(apiBase(null)).toBeNull();
   });
 });

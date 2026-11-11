@@ -9,13 +9,15 @@ export const PROTOCOL_VERSION = 1;
 export const SITES = ['hospital', 'parking', 'museum'] as const;
 export type Site = (typeof SITES)[number];
 
-/** 主题里的数据种类：pos 位置；source 设备端（模拟器）的在线状态 */
-export const KINDS = ['pos', 'source'] as const;
+/** 主题里的数据种类：pos 位置；event 设备事件（QoS 1，按 id 去重）；source 设备端（模拟器）的在线状态 */
+export const KINDS = ['pos', 'event', 'source'] as const;
 export type Kind = (typeof KINDS)[number];
 
 /** 医院的后端模拟：和人员定位页默认的名册用同一个种子和人数，同一个编号是同一个人（R2-01） */
 export const HOSPITAL_SEED = 'playground';
 export const HOSPITAL_TAGS = 2000;
+/** 后端模式下医院的设备数：所有医院页面共用这一批人和设备（R4-01） */
+export const HOSPITAL_ASSETS = 400;
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -69,6 +71,20 @@ export const positionReportSchema = z.object({
 });
 export type PositionReport = z.infer<typeof positionReportSchema>;
 
+/** 设备事件：状态变化（求助按下、设备离线等），id 全局唯一，重发时不变（R4-03） */
+export const eventReportSchema = z.object({
+  id: z.string().min(1).max(128),
+  ts: z.number().finite(),
+  type: z.string().min(1),
+  /** 事件后的状态；空字符串表示恢复正常 */
+  status: z.string(),
+});
+export type EventReport = z.infer<typeof eventReportSchema>;
+
+export function parseEventReport(payload: string | Uint8Array): Result<EventReport> {
+  return parseJson(payload, eventReportSchema);
+}
+
 /** device-sim 的遗嘱主题内容 */
 export const SOURCE_ONLINE = 'online';
 export const SOURCE_OFFLINE = 'offline';
@@ -88,7 +104,22 @@ export const redisKeys = {
   frames: (site: Site) => `ik:${site}:frames`,
   /** String：设备端（模拟器）在线状态 */
   source: (site: Site) => `ik:${site}:source`,
+  /** Hash：未处理的告警，告警 id → AlarmRecord 的 JSON */
+  openAlarms: (site: Site) => `ik:${site}:alarms:open`,
+  /** String（带过期）：处理过的事件 id，用于去重 */
+  event: (site: Site, id: string) => `ik:${site}:event:${id}`,
 };
+/** MongoDB 的库和集合名：ingest 写，gateway 读（R4） */
+export const MONGO_DB = 'indoorkit';
+export const mongoCollections = {
+  /** 时序集合：timeField ts，metaField meta = { site, deviceId } */
+  telemetry: 'telemetry',
+  alarms: 'alarms',
+  events: 'events',
+} as const;
+/** 遥测保留天数 */
+export const TELEMETRY_TTL_DAYS = 7;
+
 /** Stream 里帧的字段名 */
 export const FRAME_FIELD = 'f';
 /** Stream 约保留的帧数：每秒一帧，约 5 分钟 */
@@ -101,6 +132,20 @@ export const tagStateSchema = z.object({
   status: z.string().min(1).optional(),
 });
 export type TagState = z.infer<typeof tagStateSchema>;
+
+/**
+ * 告警记录。具体字段由各场景的业务包决定（医院：layer、kind、ruleId、subjectId……），
+ * 协议只约定所有场景共有的部分，其余原样透传。
+ */
+export const ALARM_STATES = ['open', 'acknowledged', 'resolved'] as const;
+export type AlarmState = (typeof ALARM_STATES)[number];
+export const alarmRecordSchema = z.looseObject({
+  id: z.string().min(1),
+  time: z.number().finite(),
+  level: z.string().min(1),
+  state: z.enum(ALARM_STATES),
+});
+export type AlarmRecord = z.infer<typeof alarmRecordSchema>;
 
 /** Redis Stream 的条目 id，形如 "1700000000000-0" */
 const seqSchema = z.string().regex(/^\d+-\d+$/);
@@ -122,6 +167,8 @@ export const serverFrameSchema = z.discriminatedUnion('type', [
     offline: z.array(z.string()),
     /** 设备端（模拟器）是否在线；还不知道时不带 */
     source: z.boolean().optional(),
+    /** 未处理的告警，新的在后（R4-07） */
+    alarms: z.array(alarmRecordSchema).optional(),
   }),
   z.object({ type: z.literal('positions'), ...siteFrame, positions: z.array(tagStateSchema) }),
   z.object({
@@ -131,6 +178,13 @@ export const serverFrameSchema = z.discriminatedUnion('type', [
     offline: z.array(z.string()),
   }),
   z.object({ type: z.literal('source'), ...siteFrame, online: z.boolean() }),
+  z.object({ type: z.literal('alarm'), ...siteFrame, alarm: alarmRecordSchema }),
+  z.object({
+    type: z.literal('alarm-state'),
+    ...siteFrame,
+    id: z.string().min(1),
+    state: z.enum(ALARM_STATES),
+  }),
   /** 断线续传的补发结束：之后都是实时帧（R3-05） */
   z.object({
     type: z.literal('synced'),
