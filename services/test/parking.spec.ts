@@ -118,4 +118,38 @@ describe('R5-07 restarts', () => {
     const restartedAt = Date.now() - 70_000;
     for (const a of all.filter((x) => !known.has(x.id))) expect(a.time).toBeGreaterThan(restartedAt);
   });
+
+  it('a Redis restart loses nothing: ingest writes the day and the open alarms back', async () => {
+    const before = (await snapshot()).day!.events.length;
+    const open = (await list('open')).length;
+    expect(open).toBeGreaterThan(0);
+    compose('stop', 'redis');
+    compose('start', 'redis');
+    compose('up', '-d', '--wait');
+    const after = await waitFor(
+      'parking day back in Redis',
+      async () => {
+        const { day } = await snapshot();
+        return day && day.events.length >= before ? day : null;
+      },
+      30_000,
+    );
+    expect(new Set(after.events.map((e) => e.id)).size).toBe(after.events.length);
+    await waitFor('open alarms back', async () => (await list('open')).length >= open, 30_000);
+  });
+
+  it('Redis and ingest restarted together: ingest reads the day back from MongoDB', async () => {
+    const before = (await snapshot()).day!.events.length;
+    compose('stop', 'ingest', 'redis');
+    compose('up', '-d', '--wait');
+    const after = await waitFor(
+      'parking day back from MongoDB',
+      async () => {
+        const { day } = await snapshot();
+        return day && day.events.length >= before ? day : null;
+      },
+      30_000,
+    );
+    expect(new Set(after.events.map((e) => e.id)).size).toBe(after.events.length);
+  });
 });

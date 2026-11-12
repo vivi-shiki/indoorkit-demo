@@ -133,24 +133,23 @@ export function createParkingSite(parking: Parking, options: ParkingSiteOptions)
       checkUntil(rel(now), true, options.silent ?? false);
     },
 
-    /** 取走这段时间产生的帧和告警 */
+    /** 取走这段时间产生的帧和告警；当天状态只在有变化时给 */
     drain(): { frames: StreamFrame[]; alarms: AlarmRecord[]; day: ParkingDayState | null } {
-      const out = {
-        frames,
-        alarms,
-        day: dayChanged
-          ? {
-              timeZone: options.timeZone,
-              devices: [...devices.values()],
-              reservations: booking.reservations,
-              contracts: booking.contracts,
-            }
-          : null,
-      };
+      const out = { frames, alarms, day: dayChanged ? this.day() : null };
       frames = [];
       alarms = [];
       dayChanged = false;
       return out;
+    },
+
+    /** 现在的设备读数和预约，写进 Redis 的 day */
+    day(): ParkingDayState {
+      return {
+        timeZone: options.timeZone,
+        devices: [...devices.values()],
+        reservations: booking.reservations,
+        contracts: booking.contracts,
+      };
     },
 
     /** 重启后从 Redis 读回的设备和预约 */

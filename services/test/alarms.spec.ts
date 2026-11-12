@@ -73,7 +73,7 @@ describe('R4-05, R4-07 server alarms', () => {
 describe('R4-10 acknowledging and resolving', () => {
   it('changes the state, pushes alarm-state frames and drops resolved alarms from the open list', async () => {
     const open = await waitFor('an open alarm', async () =>
-      (await list('open')).filter((a) => a.state === 'open').at(-1),
+      (await list('open')).find((a) => a.state === 'open'),
     );
     const c = rawClient();
     cleanup.push(c.close);

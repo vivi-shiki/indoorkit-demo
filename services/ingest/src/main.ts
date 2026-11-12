@@ -98,29 +98,72 @@ const hospitalAlarms = createHospitalAlarms(HOSPITAL_VENUE, {
 });
 
 const DAY = 86_400_000;
+/** 昨天 0 点以来的停车事件，和 Redis 的 ik:parking:day-events 一致；Redis 丢了数据时由它补回 */
+let dayEvents = await redis.lrange(redisKeys.dayEvents('parking'), 0, -1);
+// Redis 是空的（和 ingest 一起重启过）：从 MongoDB 读回，之后补进 Redis
+const fromMongo = dayEvents.length === 0;
+if (fromMongo) {
+  const since = dayStartOf(Date.now(), SITE_TIME_ZONE) - 86_400_000;
+  const docs = await events
+    .find({ site: 'parking', ts: { $gte: since } }, { projection: { _id: 0, site: 0 } })
+    .sort({ ts: 1 })
+    .toArray();
+  dayEvents = docs.map((d) => JSON.stringify(d));
+}
+const savedDay = await redis.get(redisKeys.day('parking'));
+
 /**
- * 停车场以当天 0 点为基准。启动和过了 0 点时都从 Redis 读回设备、预约和昨天以来的事件，
+ * 停车场以当天 0 点为基准。启动和过了 0 点时由设备、预约和昨天以来的事件重建，
  * 悄悄重放一遍，已经报过的告警不再报（R5-07）
  */
-async function loadParking() {
+function buildParking(events: readonly string[], day: ParkingDayState | null) {
   const site = createParkingSite(PARKING, {
     origin: dayStartOf(Date.now(), SITE_TIME_ZONE),
     timeZone: SITE_TIME_ZONE,
     idPrefix,
   });
-  const saved = await redis.get(redisKeys.day('parking'));
-  if (saved) site.restore(JSON.parse(saved) as ParkingDayState);
-  for (const text of await redis.lrange(redisKeys.dayEvents('parking'), 0, -1)) {
+  if (day) site.restore(day);
+  for (const text of events) {
     const r = parseParkingEvent(text);
     if (r.ok) site.event(r.value, { silent: true });
   }
   site.advance(Date.now(), { silent: true });
   site.drain();
-  return { site, origin: dayStartOf(Date.now(), SITE_TIME_ZONE) };
+  return site;
 }
-let { site: parking, origin: parkingOrigin } = await loadParking();
-/** 新的停车事件：写进当天列表和 MongoDB（重复的由台账挡掉） */
+let parking = buildParking(dayEvents, savedDay ? (JSON.parse(savedDay) as ParkingDayState) : null);
+let parkingOrigin = dayStartOf(Date.now(), SITE_TIME_ZONE);
+/** 还没写进 Redis 的新停车事件（重复的由台账挡掉） */
 const parkingEvents: string[] = [];
+
+/** Redis 重启后数据是空的（不落盘）：重连时把停车场的当天状态和未处理告警补回去 */
+let redisSeen = redis.status === 'ready';
+let resync = fromMongo && dayEvents.length > 0;
+redis.on('ready', () => {
+  if (redisSeen) resync = true;
+  redisSeen = true;
+});
+async function resyncRedis() {
+  // 每个场景最新的一批未处理告警
+  const open = (
+    await Promise.all(
+      SITES.map((site) =>
+        alarmsCollection
+          .find({ site, state: { $ne: 'resolved' } }, { projection: { _id: 0 } })
+          .sort({ time: -1 })
+          .limit(1000)
+          .toArray(),
+      ),
+    )
+  ).flat();
+  const p = redis.multi();
+  p.del(redisKeys.dayEvents('parking'));
+  if (dayEvents.length > 0) p.rpush(redisKeys.dayEvents('parking'), ...dayEvents);
+  p.set(redisKeys.day('parking'), JSON.stringify(parking.day()));
+  for (const { site, ...a } of open) p.hset(redisKeys.openAlarms(site as Site), a.id, JSON.stringify(a));
+  await p.exec();
+  log('redis state restored', { events: dayEvents.length, alarms: open.length });
+}
 
 const eventStore = {
   claim: async (site: string, id: string) =>
@@ -192,7 +235,9 @@ function handleParking(kind: string, deviceId: string, payload: Buffer) {
     if (!r.ok) return void metrics.inc('invalid_total');
     if (parking.event(r.value)) {
       metrics.inc('events_total');
-      parkingEvents.push(JSON.stringify(r.value));
+      const text = JSON.stringify(r.value);
+      parkingEvents.push(text);
+      dayEvents.push(text);
       eventStore
         .save({ ...r.value, site: 'parking' })
         .catch((err: unknown) => log('event write failed', { error: String(err) }));
@@ -258,27 +303,34 @@ async function writeHistory(flushes: Flush[], raised: (AlarmRecord & { site: Sit
   metrics.inc('alarms_total', raised.length);
 }
 
-/** 过了 0 点：这一轮的事件已经写进 Redis，以新的一天为基准重建停车场 */
-async function rollover(now: number) {
-  if (dayStartOf(now, SITE_TIME_ZONE) === parkingOrigin) return;
-  const next = await loadParking();
-  // 重建期间到的事件还在缓冲里，没进 Redis，也给新的一天
-  for (const text of parkingEvents) {
-    const r = parseParkingEvent(text);
-    if (r.ok) next.site.event(r.value, { silent: true });
-  }
-  ({ site: parking, origin: parkingOrigin } = next);
-  log('parking day rolled over', { origin: parkingOrigin });
+/** 过了 0 点：以新的一天为基准重建停车场，只留昨天 0 点以后的事件 */
+function rollover(now: number) {
+  const origin = dayStartOf(now, SITE_TIME_ZONE);
+  if (origin === parkingOrigin) return;
+  dayEvents = dayEvents.filter((text) => (JSON.parse(text) as { ts: number }).ts >= origin - DAY);
+  parking = buildParking(dayEvents, parking.day());
+  parkingOrigin = origin;
+  log('parking day rolled over', { origin });
 }
 
 async function write(flushes: Flush[], now: number) {
   const fromParking = drainParking(flushes, now);
   const events = parkingEvents.splice(0);
-  if (flushes.length === 0 && events.length === 0 && !fromParking.day) return rollover(now);
+  rollover(now);
+  // 补回时整份列表已经包含这一轮的事件
+  const full = resync;
+  if (full) {
+    resync = false;
+    await resyncRedis().catch((err: unknown) => {
+      resync = true;
+      throw err;
+    });
+  }
+  if (flushes.length === 0 && events.length === 0 && !fromParking.day) return;
   const raised = [...addAlarms(flushes), ...fromParking.alarms];
   const p = redis.multi();
   for (const { site, ...a } of raised) p.hset(redisKeys.openAlarms(site), a.id, JSON.stringify(a));
-  if (events.length > 0) p.rpush(redisKeys.dayEvents('parking'), ...events);
+  if (events.length > 0 && !full) p.rpush(redisKeys.dayEvents('parking'), ...events);
   if (fromParking.day) p.set(redisKeys.day('parking'), JSON.stringify(fromParking.day));
   for (const f of flushes) {
     const entries = Object.entries(f.state).map(([id, tag]) => [id, JSON.stringify(tag)] as const);
@@ -293,7 +345,6 @@ async function write(flushes: Flush[], now: number) {
     metrics.inc('frames_total', f.frames.length);
   }
   await p.exec();
-  await rollover(now);
   // 历史晚一点写也没关系，不挡住实时帧
   writeHistory(flushes, raised).catch((err: unknown) => {
     metrics.inc('history_errors_total');

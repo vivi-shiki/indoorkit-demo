@@ -63,6 +63,7 @@
 
 - ingest 用固定的客户端 id 和持久会话（`MQTT_CLIENT_ID`，默认 `ingest`）：ingest 重启期间设备发来的 QoS 1 事件由 broker 暂存。compose 里 device-sim 等 ingest 就绪后才启动，第一次补传不会丢。
 - Mosquitto 每个客户端默认只排队 1000 条 QoS 1 消息，补传一次有 5000 多条，超出的会被丢掉；`max_queued_messages` 调到 100000。
+- Redis 不落盘，重启后是空的。ingest 在内存里留着昨天以来的事件，Redis 重连时把当天事件、设备和预约、每个场景最新 1000 条未处理告警（从 MongoDB）写回去；ingest 和 Redis 一起重启时从 MongoDB `events` 读回当天事件。
 - 还没出场的车付没付款，浏览器模拟的计划里事先就有，后端要到出场事件才知道；运营统计里未出场的车按已付处理。
 
 ## 测试
