@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   compareSeq,
+  dateKeyOf,
+  dayStartOf,
+  GONE,
+  parseBookingReport,
   parseClientFrame,
+  parseDeviceReport,
   parseEventReport,
+  parseParkingEvent,
   parsePositionReport,
   parseServerFrame,
   parseTopic,
@@ -118,6 +124,22 @@ describe('R1-03 WebSocket frames', () => {
       },
       { type: 'alarm-state', site: 'hospital', seq: '13-2', time: 9, id: 'alarm-1', state: 'acknowledged' },
       { type: 'synced', site: 'hospital', seq: '13-0', replayed: 2 },
+      {
+        type: 'site-event',
+        site: 'parking',
+        seq: '13-3',
+        time: 9,
+        event: { kind: 'park', visitId: 'v', bayId: 'b' },
+      },
+      {
+        type: 'snapshot',
+        site: 'parking',
+        seq: '13-4',
+        time: 9,
+        positions: [],
+        offline: [],
+        day: { dayStart: 0, timeZone: 'Asia/Tokyo', parked: [] },
+      },
       { type: 'positions', site: 'hospital', seq: '14-0', time: 9, positions: [], replay: true },
       { type: 'ping', t: 9, rttMs: 12 },
       { type: 'bye', reason: 'restart' },
@@ -154,5 +176,76 @@ describe('R2-07 sequence numbers', () => {
   it('keeps every Redis key in one place', () => {
     expect(redisKeys.state('hospital')).toBe('ik:hospital:state');
     expect(redisKeys.frames('hospital')).toBe('ik:hospital:frames');
+  });
+});
+
+describe('R5-01..03 parking reports', () => {
+  const vehicle = {
+    plate: '品川 300 あ 12-34',
+    vehicleClass: 'standard',
+    permit: false,
+    contract: { kind: 'hourly' },
+  };
+  const base = {
+    id: '20261112:V00001:entry',
+    ts: 1,
+    visitId: '20261112-V00001',
+    plate: vehicle.plate,
+    bayId: 'b',
+    deviceId: 'd',
+  };
+
+  it('accepts the five parking events and keeps the vehicle on entry', () => {
+    expect(parseParkingEvent(JSON.stringify({ ...base, kind: 'entry', vehicle }))).toEqual({
+      ok: true,
+      value: { ...base, kind: 'entry', vehicle },
+    });
+    for (const kind of ['park', 'leave', 'charged'])
+      expect(parseParkingEvent(JSON.stringify({ ...base, kind })).ok).toBe(true);
+    expect(parseParkingEvent(JSON.stringify({ ...base, kind: 'exit', paid: true, gateId: 'g' })).ok).toBe(
+      true,
+    );
+  });
+
+  it('names what is missing', () => {
+    expect(parseParkingEvent(JSON.stringify({ ...base, kind: 'entry' }))).toEqual({
+      ok: false,
+      error: 'vehicle: an entry carries the vehicle',
+    });
+    expect(parseParkingEvent(JSON.stringify({ ...base, kind: 'exit' }))).toMatchObject({ ok: false });
+    expect(parseParkingEvent(JSON.stringify({ ...base, kind: 'teleport' }))).toMatchObject({ ok: false });
+  });
+
+  it('accepts device readings and the booking list', () => {
+    expect(parseDeviceReport('{"seq":1,"ts":2,"status":"online","value":12}')).toEqual({
+      ok: true,
+      value: { seq: 1, ts: 2, status: 'online', value: 12 },
+    });
+    expect(parseDeviceReport('{"seq":1,"ts":2,"status":"broken"}').ok).toBe(false);
+    const booking = {
+      ts: 1,
+      reservations: [{ id: 'R-T001', bayId: 'b', from: 10, to: 20, plate: 'p' }],
+      contracts: [{ id: 'M-001', bayId: 'b' }],
+    };
+    expect(parseBookingReport(JSON.stringify(booking))).toEqual({ ok: true, value: booking });
+  });
+
+  it('builds the new topics and marks the end of a track', () => {
+    expect(topic('parking', 'dev', 'd1')).toBe('ik/v1/parking/dev/d1');
+    expect(topic('parking', 'booking', 'sim')).toBe('ik/v1/parking/booking/sim');
+    expect(
+      parsePositionReport(JSON.stringify({ seq: 1, ts: 1, levelId: 'L', coord: [0, 0], status: GONE })).ok,
+    ).toBe(true);
+  });
+});
+
+describe('R5 site days', () => {
+  it('finds local midnight and the date in the site time zone', () => {
+    // 2026-11-12 01:30 JST = 2026-11-11 16:30 UTC
+    const t = Date.UTC(2026, 10, 11, 16, 30);
+    expect(dayStartOf(t, 'Asia/Tokyo')).toBe(Date.UTC(2026, 10, 11, 15, 0));
+    expect(dateKeyOf(t, 'Asia/Tokyo')).toBe('20261112');
+    expect(dayStartOf(t, 'UTC')).toBe(Date.UTC(2026, 10, 11));
+    expect(dayStartOf(Date.UTC(2026, 10, 11, 15, 0), 'Asia/Tokyo')).toBe(Date.UTC(2026, 10, 11, 15, 0));
   });
 });

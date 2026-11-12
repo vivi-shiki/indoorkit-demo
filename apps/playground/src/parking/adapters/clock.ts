@@ -57,3 +57,15 @@ export function createSimClock(options: { start: number; now?: () => number }): 
     },
   };
 }
+
+/** 后端模式的时钟：真实的当天时刻，不能换倍速和跳时间（docs/backend/R5-10） */
+export function createWallClock(options: { origin: number; now?: () => number }): SimClock {
+  const now = options.now ?? Date.now;
+  return {
+    time: () => now() - options.origin,
+    speed: () => 1,
+    setSpeed() {},
+    set() {},
+    subscribe: () => () => {},
+  };
+}

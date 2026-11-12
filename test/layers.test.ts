@@ -174,6 +174,8 @@ describe('parking scenario', () => {
       /^apps\/playground\/src\/app\/(scenario-layout|map|teardown|mui-theme|twin(?:\/.*)?)$/,
       /^apps\/playground\/src\/(app-i18n|app-theme|settings|theme)$/,
       /^apps\/playground\/src\/testing\/hooks$/,
+      // 后端连接：数据源模式、地址和标题栏的状态显示，三个场景共用（docs/backend/R5-10）
+      /^apps\/playground\/src\/(adapters\/live-source|presentation\/live-status)$/,
     ];
     const bad = (module: string, file: string) => {
       if (/^@indoorkit\/(hospital|rtls-simulator)/.test(module)) return true;

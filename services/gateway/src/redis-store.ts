@@ -38,11 +38,13 @@ export function createRedisStore(redis: Redis): FrameStore {
       return last[0]?.[0] ?? null;
     },
     async snapshot(site) {
-      const [state, offline, source, open] = await Promise.all([
+      const [state, offline, source, open, day, events] = await Promise.all([
         redis.hgetall(redisKeys.state(site)),
         redis.smembers(redisKeys.offline(site)),
         redis.get(redisKeys.source(site)),
         redis.hvals(redisKeys.openAlarms(site)),
+        redis.get(redisKeys.day(site)),
+        redis.lrange(redisKeys.dayEvents(site), 0, -1),
       ]);
       const positions: TagState[] = Object.values(state).map((v) => tagStateSchema.parse(JSON.parse(v)));
       return {
@@ -50,6 +52,15 @@ export function createRedisStore(redis: Redis): FrameStore {
         offline,
         source: source === null ? undefined : source === 'online',
         alarms: latestAlarms(open, SNAPSHOT_ALARMS),
+        // ingest 写的内容，原样转给浏览器
+        ...(day
+          ? {
+              day: {
+                ...(JSON.parse(day) as Record<string, unknown>),
+                events: events.map((e) => JSON.parse(e)),
+              },
+            }
+          : {}),
       };
     },
     async range(site: Site, after: string) {

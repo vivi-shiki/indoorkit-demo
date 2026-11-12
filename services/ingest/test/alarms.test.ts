@@ -9,7 +9,7 @@ import { createVenueIndex } from '@indoorkit/plugins/venue-index';
 import type { PositionBatch } from '@indoorkit/rtls';
 import { createRoster, createSimulation } from '@indoorkit/rtls-simulator';
 import { describe, expect, it } from 'vitest';
-import { createHospitalAlarms, HOSPITAL_VENUE } from '../src/hospital';
+import { createHospitalAlarms, HOSPITAL_VENUE } from '../src/hospital/alarms';
 
 describe('R4-04 preset fences', () => {
   it('defines the three demo fences once, on real levels, with message keys as names', () => {

@@ -9,8 +9,11 @@ export const PROTOCOL_VERSION = 1;
 export const SITES = ['hospital', 'parking', 'museum'] as const;
 export type Site = (typeof SITES)[number];
 
-/** 主题里的数据种类：pos 位置；event 设备事件（QoS 1，按 id 去重）；source 设备端（模拟器）的在线状态 */
-export const KINDS = ['pos', 'event', 'source'] as const;
+/**
+ * 主题里的数据种类：pos 位置；event 设备事件（QoS 1，按 id 去重）；source 设备端（模拟器）的在线状态；
+ * dev 设备状态和测量值（保留消息）；booking 预约系统的当天预约和合同（保留消息，R5-01）
+ */
+export const KINDS = ['pos', 'event', 'source', 'dev', 'booking'] as const;
 export type Kind = (typeof KINDS)[number];
 
 /** 医院的后端模拟：和人员定位页默认的名册用同一个种子和人数，同一个编号是同一个人（R2-01） */
@@ -61,6 +64,9 @@ export function parseTopic(text: string): Result<TopicParts> {
 
 const coordSchema = z.tuple([z.number().finite(), z.number().finite()]);
 
+/** 行驶结束（停下或出场）的标签发最后一条这个状态的位置，ingest 把它删掉而不是当作离线（R5-03） */
+export const GONE = 'gone';
+
 /** 设备上报的一个位置；seq 是这个设备自己的递增序号，ts 是设备时间（毫秒） */
 export const positionReportSchema = z.object({
   seq: z.number().int().nonnegative(),
@@ -83,6 +89,132 @@ export type EventReport = z.infer<typeof eventReportSchema>;
 
 export function parseEventReport(payload: string | Uint8Array): Result<EventReport> {
   return parseJson(payload, eventReportSchema);
+}
+
+/** 入场时由控制器查合同库后带上的车辆属性；具体取值由 domains/parking 决定，这里只约定车牌 */
+const vehicleSchema = z.looseObject({
+  plate: z.string().min(1),
+  vehicleClass: z.string().min(1),
+  permit: z.boolean(),
+  contract: z.looseObject({ kind: z.string().min(1) }),
+});
+
+export const PARKING_EVENT_KINDS = ['entry', 'park', 'leave', 'exit', 'charged'] as const;
+export type ParkingEventKind = (typeof PARKING_EVENT_KINDS)[number];
+
+/**
+ * 停车场的事件（R5-02）：入场和出场来自车牌识别相机，停车和离开来自车位检测，充满电来自充电桩。
+ * id 是 {日期}:{visitId}:{kind}，重发和补传时不变。
+ */
+export const parkingEventSchema = z
+  .object({
+    id: z.string().min(1).max(128),
+    ts: z.number().finite(),
+    kind: z.enum(PARKING_EVENT_KINDS),
+    visitId: z.string().min(1),
+    plate: z.string().min(1),
+    bayId: z.string().min(1),
+    deviceId: z.string().min(1),
+    vehicle: vehicleSchema.optional(),
+    paid: z.boolean().optional(),
+    gateId: z.string().min(1).optional(),
+  })
+  .check((ctx) => {
+    const e = ctx.value;
+    if (e.kind === 'entry' && !e.vehicle)
+      ctx.issues.push({
+        code: 'custom',
+        path: ['vehicle'],
+        message: 'an entry carries the vehicle',
+        input: e,
+      });
+    if (e.kind === 'exit' && (e.paid === undefined || e.gateId === undefined))
+      ctx.issues.push({
+        code: 'custom',
+        path: ['paid'],
+        message: 'an exit carries paid and gateId',
+        input: e,
+      });
+  });
+export type ParkingEventReport = z.infer<typeof parkingEventSchema>;
+
+export function parseParkingEvent(payload: string | Uint8Array): Result<ParkingEventReport> {
+  return parseJson(payload, parkingEventSchema);
+}
+
+export const DEVICE_STATUSES = ['online', 'offline', 'fault', 'calling'] as const;
+
+/** 设备状态和测量值（如 CO 浓度），保留消息；状态变化时和每分钟各发一次（R5-01） */
+export const deviceReportSchema = z.object({
+  seq: z.number().int().nonnegative(),
+  ts: z.number().finite(),
+  status: z.enum(DEVICE_STATUSES),
+  value: z.number().finite().optional(),
+});
+export type DeviceReport = z.infer<typeof deviceReportSchema>;
+
+export function parseDeviceReport(payload: string | Uint8Array): Result<DeviceReport> {
+  return parseJson(payload, deviceReportSchema);
+}
+
+/** 预约系统：昨天和今天的预约（时刻是真实时间的毫秒）和月租合同，保留消息（R5-01） */
+export const bookingReportSchema = z.object({
+  ts: z.number().finite(),
+  reservations: z.array(
+    z.object({
+      id: z.string().min(1),
+      bayId: z.string().min(1),
+      from: z.number().finite(),
+      to: z.number().finite(),
+      plate: z.string().min(1),
+    }),
+  ),
+  contracts: z.array(z.object({ id: z.string().min(1), bayId: z.string().min(1) })),
+});
+export type BookingReport = z.infer<typeof bookingReportSchema>;
+
+export function parseBookingReport(payload: string | Uint8Array): Result<BookingReport> {
+  return parseJson(payload, bookingReportSchema);
+}
+
+/** 停车场演示的种子，和浏览器模拟相同（R5） */
+export const PARKING_SEED = 'minato';
+/** 停车场、博物馆的时刻按这个时区的当天算 */
+export const SITE_TIME_ZONE = 'Asia/Tokyo';
+
+const localParts = (ms: number, timeZone: string) => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(ms);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)!.value);
+  return {
+    y: get('year'),
+    m: get('month'),
+    d: get('day'),
+    h: get('hour'),
+    min: get('minute'),
+    s: get('second'),
+  };
+};
+
+/** ms 那一刻在 timeZone 里的当天 0 点（真实时间的毫秒） */
+export function dayStartOf(ms: number, timeZone: string): number {
+  const p = localParts(ms, timeZone);
+  const offset = Date.UTC(p.y, p.m - 1, p.d, p.h, p.min, p.s) - Math.floor(ms / 1000) * 1000;
+  return Date.UTC(p.y, p.m - 1, p.d) - offset;
+}
+
+/** ms 那一刻在 timeZone 里的日期，如 20261112 */
+export function dateKeyOf(ms: number, timeZone: string): string {
+  const p = localParts(ms, timeZone);
+  return `${p.y}${String(p.m).padStart(2, '0')}${String(p.d).padStart(2, '0')}`;
 }
 
 /** device-sim 的遗嘱主题内容 */
@@ -108,6 +240,10 @@ export const redisKeys = {
   openAlarms: (site: Site) => `ik:${site}:alarms:open`,
   /** String（带过期）：处理过的事件 id，用于去重 */
   event: (site: Site, id: string) => `ik:${site}:event:${id}`,
+  /** List：昨天 0 点以后的场景事件（JSON），快照时整份给浏览器（R5-07） */
+  dayEvents: (site: Site) => `ik:${site}:day-events`,
+  /** String：场景的当天状态（JSON），快照的 day（R5-07） */
+  day: (site: Site) => `ik:${site}:day`,
 };
 /** MongoDB 的库和集合名：ingest 写，gateway 读（R4） */
 export const MONGO_DB = 'indoorkit';
@@ -169,6 +305,8 @@ export const serverFrameSchema = z.discriminatedUnion('type', [
     source: z.boolean().optional(),
     /** 未处理的告警，新的在后（R4-07） */
     alarms: z.array(alarmRecordSchema).optional(),
+    /** 停车场、博物馆的当天状态，内容由场景决定（R5-04） */
+    day: z.looseObject({}).optional(),
   }),
   z.object({ type: z.literal('positions'), ...siteFrame, positions: z.array(tagStateSchema) }),
   z.object({
@@ -185,6 +323,8 @@ export const serverFrameSchema = z.discriminatedUnion('type', [
     id: z.string().min(1),
     state: z.enum(ALARM_STATES),
   }),
+  /** 场景事件（停车事件、设备状态变化），内容由场景决定（R5-04） */
+  z.object({ type: z.literal('site-event'), ...siteFrame, event: z.looseObject({}) }),
   /** 断线续传的补发结束：之后都是实时帧（R3-05） */
   z.object({
     type: z.literal('synced'),

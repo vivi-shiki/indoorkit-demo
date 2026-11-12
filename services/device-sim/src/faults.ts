@@ -8,6 +8,8 @@ export interface Outgoing {
   payload: string;
   /** 默认 0（位置）；事件用 1 */
   qos?: 0 | 1;
+  /** 保留消息：设备的当前状态，后连上的订阅者也能收到 */
+  retain?: boolean;
 }
 
 const rate = z.number().min(0).max(1);

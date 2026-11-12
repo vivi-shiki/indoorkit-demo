@@ -60,6 +60,7 @@ export function createSession({ socket, store, now, limits }: SessionOptions) {
     };
     if (snap.source !== undefined) frame.source = snap.source;
     if (snap.alarms.length > 0) frame.alarms = snap.alarms;
+    if (snap.day) frame.day = snap.day;
     send(frame);
     cursor = seq;
     stats.snapshots++;

@@ -51,6 +51,7 @@ function fakeLive() {
     alarm(e) {
       for (const l of [...alarmListeners]) l(e);
     },
+    onSite: () => () => {},
     set(state) {
       status = { ...status, state };
       for (const l of [...listeners]) l(status);

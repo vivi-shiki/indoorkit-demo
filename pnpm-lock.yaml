@@ -226,6 +226,12 @@ importers:
       '@indoorkit/imdf':
         specifier: workspace:*
         version: link:../../sdk/packages/imdf
+      '@indoorkit/parking':
+        specifier: workspace:*
+        version: link:../../domains/parking
+      '@indoorkit/parking-simulator':
+        specifier: workspace:*
+        version: link:../../tools/parking-simulator
       '@indoorkit/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -291,6 +297,9 @@ importers:
       '@indoorkit/imdf':
         specifier: workspace:*
         version: link:../../sdk/packages/imdf
+      '@indoorkit/parking':
+        specifier: workspace:*
+        version: link:../../domains/parking
       '@indoorkit/plugins':
         specifier: workspace:*
         version: link:../../sdk/packages/plugins
@@ -322,6 +331,9 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
     devDependencies:
+      '@indoorkit/parking-simulator':
+        specifier: workspace:*
+        version: link:../../tools/parking-simulator
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2

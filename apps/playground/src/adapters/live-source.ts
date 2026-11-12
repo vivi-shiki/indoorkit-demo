@@ -19,6 +19,11 @@ export function resolveSource(query: URLSearchParams, buildUrl: string | undefin
   return { mode, url };
 }
 
+/** 这个页面地址的数据源模式和后端地址，后端地址缺省时用构建时的 VITE_LIVE_URL（三个场景共用） */
+export function backendOf(query: URLSearchParams) {
+  return resolveSource(query, import.meta.env.VITE_LIVE_URL || undefined);
+}
+
 /** 后端 WebSocket 地址对应的 REST 地址：ws://host/ws → http://host/api（docs/backend/R4-08） */
 export function apiBase(wsUrl: string | null): string | null {
   if (!wsUrl) return null;

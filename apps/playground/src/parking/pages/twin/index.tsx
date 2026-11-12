@@ -1,7 +1,7 @@
 import { type TwinData, TwinPage } from '../../../app/twin';
 import { parkingIndoor } from '../../adapters/twin-indoor';
 import { parkingLevelStatus } from '../../adapters/twin-status';
-import { liveAt, loadParking } from '../../adapters/venue';
+import { isBackend, liveAt, loadParking } from '../../adapters/venue';
 
 async function load(): Promise<TwinData> {
   const ctx = await loadParking();
@@ -12,6 +12,7 @@ async function load(): Promise<TwinData> {
     indoor: parkingIndoor(ctx),
     operationsHref: '#/parking/availability',
     timeDependent: true,
+    ...(isBackend(ctx) ? { hour: Math.floor(ctx.clock.time() / 3600_000) % 24 } : {}),
     status: (time) => parkingLevelStatus(liveAt(ctx, time).freeByLevel, totals),
     legend: [
       { status: 'good', label: 'legendFree' },

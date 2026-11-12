@@ -169,4 +169,29 @@ describe('status listeners', () => {
     expect(states).toEqual(['connecting', 'open']);
     p.dispose();
   });
+
+  it('R5-04 passes on the day of the snapshot and the site events after it', async () => {
+    const { p } = make();
+    const got: unknown[] = [];
+    p.onSite((e) => got.push(e));
+    await p.start();
+    const ws = FakeSocket.last();
+    ws.open();
+    ws.push({
+      type: 'snapshot',
+      site: 'parking',
+      seq: '1-0',
+      time: 1,
+      positions: [],
+      offline: [],
+      day: { dayStart: 0 },
+    });
+    ws.push({ type: 'site-event', site: 'parking', seq: '2-0', time: 2, event: { kind: 'park' } });
+    ws.push({ type: 'site-event', site: 'parking', seq: '2-0', time: 2, event: { kind: 'park' } });
+    expect(got).toEqual([
+      { type: 'day', time: 1, day: { dayStart: 0 } },
+      { type: 'event', time: 2, event: { kind: 'park' } },
+    ]);
+    p.dispose();
+  });
 });

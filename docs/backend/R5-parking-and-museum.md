@@ -26,9 +26,9 @@
 | 编号 | 需求 |
 | --- | --- |
 | R5-01 | 主题仍是 `ik/v1/{site}/{kind}/{deviceId}`。停车场用到：`pos`（行驶中的车辆位置，设备 id 是这次停车的 id，如 `20261112-V00042`）、`event`（入场、停车、离开、出场、充满电，QoS 1）、`dev`（设备状态和测量值：在线、离线、故障、呼叫中，CO 浓度）、`booking`（预约系统的当天预约和月租合同，保留消息）。新的上报都有 zod schema |
-| R5-02 | 停车事件 `{ id, ts, kind, visitId, plate, bayId, deviceId, vehicle?, paid?, gateId? }`：`entry` 带 `vehicle`（车牌、车型、许可、合同），`exit` 带 `paid` 和 `gateId`。事件 id 是 `{日期}:{visitId}:{kind}`，跨天不重复 |
+| R5-02 | 停车事件 `{ id, ts, kind, visitId, plate, bayId, deviceId, vehicle?, paid?, gateId? }`：`entry` 带 `vehicle`（车牌、车型、许可、合同），`exit` 带 `paid` 和 `gateId`。事件 id 是 `{visitId}:{kind}`；visitId 带日期（`20261112-V00042`），所以跨天不重复 |
 | R5-03 | 行驶中的车辆停下或出场时，device-sim 发一条 `status: "gone"` 的位置；ingest 把它从现在的位置里删掉，不当作离线 |
-| R5-04 | WebSocket 新增 `site-event` 帧（带 seq，和别的帧一起补发）：停车场的停车事件和设备状态变化。快照新增 `day`：`{ dayStart, timeZone, parked, devices, reservations, contracts, events }`，`events` 是昨天 0 点起的全部停车事件 |
+| R5-04 | WebSocket 新增 `site-event` 帧（带 seq，和别的帧一起补发）：停车场的停车事件和设备状态变化。快照新增 `day`：`{ timeZone, devices, reservations, contracts, events }`，`events` 是昨天 0 点起的全部停车事件；停着的车由浏览器用同一份台账从事件算出，当天 0 点由 `timeZone` 算出 |
 
 ### ingest
 
@@ -57,6 +57,13 @@
 - 页面上新建的预约、法人手配、活动包场不写后端（仍只存在浏览器里）。
 - 不做多个停车场；不做真实的车牌识别和合同库。
 - 后端模式不能快进和跳时间。
+- 页面开着过了 0 点不换日：时刻接着 24 点往后走，刷新页面后以新的一天为准（ingest 会自己换日）。
+
+## 实现中补上的
+
+- ingest 用固定的客户端 id 和持久会话（`MQTT_CLIENT_ID`，默认 `ingest`）：ingest 重启期间设备发来的 QoS 1 事件由 broker 暂存。compose 里 device-sim 等 ingest 就绪后才启动，第一次补传不会丢。
+- Mosquitto 每个客户端默认只排队 1000 条 QoS 1 消息，补传一次有 5000 多条，超出的会被丢掉；`max_queued_messages` 调到 100000。
+- 还没出场的车付没付款，浏览器模拟的计划里事先就有，后端要到出场事件才知道；运营统计里未出场的车按已付处理。
 
 ## 测试
 
@@ -66,7 +73,7 @@
 | R5-02, R5-03 | device-sim 由计划生成的事件 id、补传范围、行驶结束时的 `gone` | `services/device-sim/test/parking.test.ts` |
 | R5-05, R5-06 | 同一份计划，ingest 的场内状态和逐分钟告警与浏览器模拟（`createAlarmStore`）一致；事件乱序到达时按时间处理；重复事件只处理一次 | `services/ingest/test/parking.test.ts` |
 | R5-04, R5-08 | 快照带 `day`；`site-event` 帧补发 | `services/gateway/test/session.test.ts` |
-| R5-09 | 由快照和帧维护的 `ParkingDay` 和浏览器模拟在同一时刻回答相同 | `apps/playground/test/parking-live.test.ts` |
+| R5-09 | 由快照和帧维护的 `ParkingDay` 和浏览器模拟在同一时刻回答相同（输入是 device-sim 的补传经 ingest 处理后的结果）；服务端告警换成当天时刻；auto 模式 4 秒没等到快照就用浏览器模拟 | `apps/playground/test/parking-backend.test.ts` |
 | R5-05..08 | 集成：启动后快照里有停着的车和昨天起的事件；告警出现在 `/alarms`；重启 device-sim 后事件和告警不重复 | `services/test/parking.spec.ts` |
 | R5-10 | 浏览器：停车场 5 个页面和 3D 页在 `?source=live` 下打开、显示后端状态、有数据；告警来自后端 | `apps/playground/e2e-live/parking-live.spec.ts` |
 

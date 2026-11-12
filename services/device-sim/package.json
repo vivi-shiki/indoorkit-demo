@@ -10,6 +10,8 @@
   "dependencies": {
     "@indoorkit/hospital": "workspace:*",
     "@indoorkit/imdf": "workspace:*",
+    "@indoorkit/parking": "workspace:*",
+    "@indoorkit/parking-simulator": "workspace:*",
     "@indoorkit/protocol": "workspace:*",
     "@indoorkit/rtls-simulator": "workspace:*",
     "@indoorkit/service-kit": "workspace:*",

@@ -1,4 +1,9 @@
-import { createParkingFeed, type ParkingFeed, type Visit } from '@indoorkit/parking-simulator';
+import {
+  createParkingFeed,
+  type ParkingDay,
+  type ParkingFeed,
+  type Visit,
+} from '@indoorkit/parking-simulator';
 import { positionStreamPlugin } from '@indoorkit/plugins';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { parseClockParam } from '../../adapters/clock';
@@ -30,14 +35,20 @@ export function VehiclesPage({ query }: ParkingPageProps) {
     floor: '1F',
     startAt: query.has('t') ? parseClockParam(query.get('t')) : undefined,
     plugins: (ctx) => {
-      feed.current = createParkingFeed(ctx.day, {
-        startAt: ctx.clock.time(),
-        intervalMs: 1000,
-        speed: ctx.clock.speed(),
-      });
+      // 后端模式下行驶中的车来自后端的位置流；浏览器模拟时按模拟时钟生成
+      const live = ctx.source?.movingFeed() ?? null;
+      const sim = live
+        ? null
+        : createParkingFeed(ctx.day as ParkingDay, {
+            startAt: ctx.clock.time(),
+            intervalMs: 1000,
+            speed: ctx.clock.speed(),
+          });
+      feed.current = sim;
+      const provider = live ?? sim!;
       return [
         ...bayPlugins(ctx),
-        positionStreamPlugin({ provider: feed.current, intervalMs: 1000, circleColor: MOVING_COLOR }),
+        positionStreamPlugin({ provider, intervalMs: 1000, circleColor: MOVING_COLOR }),
       ] as const;
     },
   });

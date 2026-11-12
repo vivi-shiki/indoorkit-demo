@@ -5,6 +5,7 @@
 export * from './alarm';
 export * from './booking';
 export * from './extensions';
+export * from './ledger';
 export * from './model';
 export * from './routing';
 export * from './stats';

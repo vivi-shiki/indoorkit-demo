@@ -10,6 +10,7 @@
   "dependencies": {
     "@indoorkit/hospital": "workspace:*",
     "@indoorkit/imdf": "workspace:*",
+    "@indoorkit/parking": "workspace:*",
     "@indoorkit/plugins": "workspace:*",
     "@indoorkit/protocol": "workspace:*",
     "@indoorkit/rtls": "workspace:*",
@@ -22,6 +23,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@indoorkit/parking-simulator": "workspace:*",
     "esbuild": "^0.28.2",
     "tsx": "^4.20.0"
   }

@@ -51,3 +51,24 @@ describe('R3-03 the simulator going away', () => {
     ]);
   });
 });
+
+describe('R5-03 tracks that end', () => {
+  it('forwards the gone report once, drops the tag from the state and never calls it offline', () => {
+    const s = createIngestState({ offlineAfterMs: 10_000 });
+    s.accept('parking', 'v1', r(1), 0);
+    s.flush(1000);
+    s.accept('parking', 'v1', { ...r(2), status: 'gone' }, 2000);
+    const [f] = s.flush(2500);
+    expect(f!.frames).toEqual([
+      {
+        type: 'positions',
+        site: 'parking',
+        time: 2500,
+        positions: [{ ...r(2), id: 'v1', status: 'gone' }].map(({ seq: _, ts: __, ...t }) => t),
+      },
+    ]);
+    expect(f!.state).toEqual({});
+    expect(f!.removed).toEqual(['v1']);
+    expect(s.flush(20_000)).toEqual([]);
+  });
+});

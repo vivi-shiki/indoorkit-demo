@@ -30,6 +30,8 @@ export interface TwinData {
   metrics(time: number): { label: TwinKey; value: number; total?: number }[];
   operationsHref: string;
   timeDependent?: boolean;
+  /** 打开时的时刻（几点）；没有时是下午 2 点。停车场连后端时是现在 */
+  hour?: number;
   /** 涂在模型上的业务状态（停车场每层空位、博物馆报警的房间） */
   status?(time: number): StatusPaint[];
   legend?: { status: TwinStatus; label: TwinKey }[];
@@ -304,6 +306,12 @@ export function TwinPage({ asset, load }: { asset: string; load(): Promise<TwinD
     });
   };
 
+  // 数据给出打开时的时刻（后端模式下是现在）
+  useEffect(() => {
+    if (data?.hour === undefined) return;
+    setHour(data.hour);
+    if (time.current) time.current.value = String(data.hour);
+  }, [data]);
   // 模拟时间：太阳、夜间灯光和业务状态
   useEffect(() => {
     if (!api || !data) return;

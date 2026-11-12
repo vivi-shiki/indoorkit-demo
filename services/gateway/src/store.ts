@@ -13,6 +13,8 @@ export interface FrameStore {
     offline: string[];
     source: boolean | undefined;
     alarms: AlarmRecord[];
+    /** 停车场、博物馆的当天状态和昨天以来的场景事件（R5-04） */
+    day?: Record<string, unknown>;
   }>;
   /** after 之后的所有帧；after 之后的帧已经被裁掉时返回 'gone' */
   range(site: Site, after: string): Promise<SeqFrame[] | 'gone'>;

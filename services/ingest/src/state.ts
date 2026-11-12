@@ -1,4 +1,4 @@
-import type { PositionReport, Site, StreamFrame, TagState } from '@indoorkit/protocol';
+import { GONE, type PositionReport, type Site, type StreamFrame, type TagState } from '@indoorkit/protocol';
 
 export interface IngestOptions {
   /** 多久没有上报判为离线（毫秒） */
@@ -13,6 +13,8 @@ export interface Flush {
   state: Record<string, TagState>;
   offlineAdd: string[];
   offlineRemove: string[];
+  /** 行驶结束、要从现在的状态里删掉的标签（R5-03） */
+  removed: string[];
   /** 设备端在线状态有变化时才有 */
   source?: boolean;
 }
@@ -20,6 +22,7 @@ export interface Flush {
 interface SiteState {
   last: Map<string, { seq: number; ts: number; seenAt: number }>;
   pending: Map<string, TagState>;
+  removed: Set<string>;
   offline: Set<string>;
   cameBack: Set<string>;
   source: boolean | undefined;
@@ -38,6 +41,7 @@ export function createIngestState(options: IngestOptions) {
       s = {
         last: new Map(),
         pending: new Map(),
+        removed: new Set(),
         offline: new Set(),
         cameBack: new Set(),
         source: undefined,
@@ -57,10 +61,18 @@ export function createIngestState(options: IngestOptions) {
       const s = siteOf(site);
       const prev = s.last.get(deviceId);
       if (prev && report.seq <= prev.seq && report.ts <= prev.ts) return 'stale';
-      s.last.set(deviceId, { seq: report.seq, ts: report.ts, seenAt: now });
       const tag: TagState = { id: deviceId, levelId: report.levelId, coord: report.coord };
       if (report.status) tag.status = report.status;
       s.pending.set(deviceId, tag);
+      // 行驶结束：转发这一条让浏览器删掉，之后不再跟踪，也就不会判离线
+      if (report.status === GONE) {
+        s.last.delete(deviceId);
+        s.offline.delete(deviceId);
+        s.removed.add(deviceId);
+        return 'accepted';
+      }
+      s.removed.delete(deviceId);
+      s.last.set(deviceId, { seq: report.seq, ts: report.ts, seenAt: now });
       if (s.offline.delete(deviceId)) s.cameBack.add(deviceId);
       return 'accepted';
     },
@@ -99,14 +111,16 @@ export function createIngestState(options: IngestOptions) {
           const flush: Flush = {
             site,
             frames,
-            state: Object.fromEntries(s.pending),
+            state: Object.fromEntries([...s.pending].filter(([id]) => !s.removed.has(id))),
             offlineAdd: wentOffline,
             offlineRemove: cameBack,
+            removed: [...s.removed],
           };
           if (s.sourceChanged) flush.source = s.source!;
           out.push(flush);
         }
         s.pending.clear();
+        s.removed.clear();
         s.cameBack.clear();
         s.sourceChanged = false;
       }

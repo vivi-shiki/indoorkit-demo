@@ -30,10 +30,17 @@ Requirements, tests and acceptance per requirement: docs/backend/R1..R6 (Chinese
 - Integration: `services/test/history.spec.ts` (ordered track in range, asset track, 400 over an hour, empty for unknown) and `alarms.spec.ts` (open list newest first and in the snapshot; alarms raised around ingest and gateway restarts all reach the client and match MongoDB; ack/resolve change state, push frames and leave the open list).
 - Browser: `e2e-live/hospital-live.spec.ts` (assets, occupancy, trail and alerts in live mode).
 
+## R5a (2026-11-12)
+
+- Unit: protocol parking reports and `site-event`; device-sim plan playback and backfill; domain ledger; ingest alarm parity with the browser simulation, duplicates once, silent rebuild; gateway snapshot `day`; playground `parking-backend.test.ts` (the day built from device-sim → ingest output answers like the simulation, frames after the snapshot, moving vehicles, server alarms, auto fallback).
+- Integration: `services/test/parking.spec.ts` (snapshot day since yesterday 0:00 with parked cars; alarms raised once; device-sim and ingest restarts add no duplicates).
+- Browser: `e2e-live/parking-live.spec.ts` (five pages and the twin on the backend at Tokyo time, no speed chips, alarms acknowledged through REST and kept after reload).
+
 # PROPOSALS
 
 - No.1 Compose stack with MQTT → ingest → Redis Streams → WebSocket gateway, browser switching provider [CONFIRMED]
 - No.2 R4: MongoDB history, alarms computed in ingest, REST in the gateway, five hospital pages on the backend [CONFIRMED]
+- No.3 R5a: parking on the backend, one ledger shared by ingest and the browser [CONFIRMED]
 
 ## No.1 Compose stack with MQTT → ingest → Redis Streams → WebSocket gateway, browser switching provider
 
@@ -67,3 +74,17 @@ See ADR 0008. Frames carry the Redis Stream id as their sequence number so the g
 - From ec50f42 (docs only) CI failed with the twin specs timing out; the passing run before already used 2.0 of 2.5 minutes. Reproduced locally by limiting to 2 CPUs (`taskset -c 0,1`, CI settings, no retries): 6 twin tests failed. Two twin tests rendering on SwiftShader at the same time starve each other, and the 390px inspection timed out creating its browser context because the 30 s default timeout applied to fixtures.
 - Fix: a `twin` Playwright project for the twin specs (including the leak-bench one) with `workers: 1` and a project timeout of 150 s that covers fixtures.
 - Confirmed: full suite on 2 CPUs, no retries, 170/170; slowest twin test 1.9 min.
+
+## No.3 R5a: parking on the backend, one ledger shared by ingest and the browser
+
+### CODE CHANGE
+
+- `domains/parking` gains `createParkingLedger` (events → visits, parked cars, exits, sessions); ingest and the browser both use it.
+- device-sim plays the seeded plan at real time in Asia/Tokyo and backfills from yesterday 0:00 on start; ingest checks alarms minute by minute on data time and rebuilds silently on restart and at midnight.
+- gateway snapshot carries `day`; the browser keeps a live `ParkingDayView`, server alarms and a wall clock behind the same `ParkingContext`, decided when the page opens.
+
+### CONFIRMED
+
+- The first stack run had only 884 of about 5300 backfilled events: ingest subscribed after device-sim published, and Mosquitto queues only 1000 QoS 1 messages per client. Fixed with a fixed client id and persistent session for ingest, device-sim waiting for ingest in Compose, and `max_queued_messages 100000`.
+- The browser simulation knows ahead whether a car still parked will leave unpaid; the backend learns it at exit. Parity tests compare `paid` for exited cars only.
+- `pnpm verify` 543 tests, `pnpm backend:test` 23/23, `pnpm e2e:live` 13/13, `pnpm e2e` 170/170.

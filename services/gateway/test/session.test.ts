@@ -140,3 +140,15 @@ describe('R4 alarms', () => {
     expect(session.stats().skipped).toBe(1);
   });
 });
+
+describe('R5-04 site days', () => {
+  it('puts the day of the site into the snapshot and passes site events on', async () => {
+    const { store, socket, session } = setup();
+    store.day = { timeZone: 'Asia/Tokyo', events: [{ kind: 'entry' }] };
+    await session.receive(subscribe());
+    expect(socket.sent[1]).toMatchObject({ type: 'snapshot', day: store.day });
+    const e = store.push({ type: 'site-event', site: 'hospital', time: 2, event: { kind: 'park' } });
+    session.deliver(e);
+    expect(socket.sent.at(-1)).toEqual(e);
+  });
+});

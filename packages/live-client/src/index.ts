@@ -52,10 +52,16 @@ export type AlarmEvent =
   | { type: 'state'; id: string; state: AlarmState }
   | { type: 'reset'; alarms: AlarmRecord[] };
 
+/** 停车场、博物馆的当天状态：快照时整份给出，之后是一条条场景事件（docs/backend/R5-04） */
+export type SiteEvent =
+  | { type: 'day'; time: number; day: Record<string, unknown> }
+  | { type: 'event'; time: number; event: Record<string, unknown> };
+
 export interface LiveProvider extends DataProvider {
   status(): LiveStatus;
   onStatus(listener: (status: LiveStatus) => void): () => void;
   onAlarm(listener: (event: AlarmEvent) => void): () => void;
+  onSite(listener: (event: SiteEvent) => void): () => void;
 }
 
 export interface LiveOptions {
@@ -89,6 +95,10 @@ export function createLiveProvider(options: LiveOptions): LiveProvider {
   const alarmListeners = new Set<(event: AlarmEvent) => void>();
   const emitAlarm = (event: AlarmEvent) => {
     for (const l of [...alarmListeners]) l(event);
+  };
+  const siteListeners = new Set<(event: SiteEvent) => void>();
+  const emitSite = (event: SiteEvent) => {
+    for (const l of [...siteListeners]) l(event);
   };
 
   let started = false;
@@ -187,6 +197,7 @@ export function createLiveProvider(options: LiveOptions): LiveProvider {
         if (frame.source !== undefined) status.sourceOnline = frame.source;
         status.snapshots++;
         emit(frame.time, frame.positions);
+        if (frame.day) emitSite({ type: 'day', time: frame.time, day: frame.day });
         if (frame.alarms) emitAlarm({ type: 'reset', alarms: frame.alarms });
         synced();
         notify();
@@ -205,6 +216,7 @@ export function createLiveProvider(options: LiveOptions): LiveProvider {
     if (frame.type === 'positions') emit(frame.time, frame.positions);
     else if (frame.type === 'alarm') emitAlarm({ type: 'raise', alarm: frame.alarm });
     else if (frame.type === 'alarm-state') emitAlarm({ type: 'state', id: frame.id, state: frame.state });
+    else if (frame.type === 'site-event') emitSite({ type: 'event', time: frame.time, event: frame.event });
     else if (frame.type === 'device') {
       for (const id of frame.online) offline.delete(id);
       for (const id of frame.offline) offline.add(id);
@@ -275,6 +287,10 @@ export function createLiveProvider(options: LiveOptions): LiveProvider {
       alarmListeners.add(listener);
       return () => alarmListeners.delete(listener);
     },
+    onSite(listener) {
+      siteListeners.add(listener);
+      return () => siteListeners.delete(listener);
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
@@ -284,6 +300,7 @@ export function createLiveProvider(options: LiveOptions): LiveProvider {
       listeners.clear();
       statusListeners.clear();
       alarmListeners.clear();
+      siteListeners.clear();
     },
   };
 }

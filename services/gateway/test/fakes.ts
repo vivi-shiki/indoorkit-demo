@@ -14,7 +14,9 @@ export function fakeStore(keep = 300) {
     state: typeof state;
     offline: typeof offline;
     alarms: typeof alarms;
+    day: Record<string, unknown> | undefined;
   } = {
+    day: undefined,
     state,
     offline,
     alarms,
@@ -35,6 +37,7 @@ export function fakeStore(keep = 300) {
         offline: [...offline],
         source: undefined,
         alarms: [...alarms],
+        ...(store.day ? { day: store.day } : {}),
       };
     },
     async range(_site: Site, after: string) {

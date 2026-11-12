@@ -11,11 +11,13 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
+import type { SourceStatus } from '../adapters/live-source';
 import { createTrackedMap, FloorButtons, fitToStage, followAppSettings } from '../app/map';
 import { trackTeardown } from '../app/teardown';
 import { useLocale } from '../app-i18n';
+import { LiveStatusMetric } from '../presentation/live-status';
 import { SPEEDS } from './adapters/clock';
-import { loadParking, type ParkingContext } from './adapters/venue';
+import { isBackend, loadParking, type ParkingContext } from './adapters/venue';
 import { type ParkingKey, useParkingT, useParkingTitle } from './i18n';
 import { clockText } from './presentation/format';
 import { ChoiceChips } from './presentation/ui';
@@ -72,6 +74,7 @@ export function useParkingMap<const P extends readonly AnyPlugin[]>(
     const create = async () => {
       const ctx = await loadParking();
       if (disposed) return;
+      // 后端模式下时钟是真实时间，set 不起作用
       if (initial.startAt !== undefined) ctx.clock.set(initial.startAt);
       indoor = await createTrackedMap({
         container: stage.querySelector<HTMLElement>('.map')!,
@@ -147,7 +150,18 @@ export function useTick(
   }, [page, ms]);
 }
 
-/** 标题栏里的模拟时刻和倍速 */
+/** 数据源的状态，变化时重画（docs/backend/R5-10） */
+function useSourceStatus(ctx: ParkingContext | null): SourceStatus | null {
+  const [status, setStatus] = useState<SourceStatus | null>(null);
+  useEffect(() => {
+    const source = ctx?.source;
+    setStatus(source?.status() ?? null);
+    return source?.onStatus(setStatus);
+  }, [ctx]);
+  return status;
+}
+
+/** 标题栏里的时刻和倍速；后端模式下是真实的当天时刻，没有倍速，旁边是后端连接状态 */
 function SimClock({ ctx }: { ctx: ParkingContext | null }) {
   const t = useParkingT();
   const [, tick] = useReducer((v: number) => v + 1, 0);
@@ -159,19 +173,25 @@ function SimClock({ ctx }: { ctx: ParkingContext | null }) {
     (l) => ctx?.clock.subscribe(l) ?? (() => {}),
     () => ctx?.clock.speed() ?? 1,
   );
+  const status = useSourceStatus(ctx);
   if (!ctx) return null;
+  const backend = isBackend(ctx);
   return (
     <span className="sim-clock">
       <span className="metric">
-        {t('clock.label')}: <b data-testid="sim-clock">{clockText(ctx.clock.time())}</b>
+        {t(backend ? 'clock.liveLabel' : 'clock.label')}:{' '}
+        <b data-testid="sim-clock">{clockText(ctx.clock.time())}</b>
       </span>
-      <ChoiceChips
-        testId="speed-chip"
-        label={t('control.speed')}
-        items={SPEEDS.map((s) => ({ value: s, text: `${s}×` }))}
-        selected={speed}
-        onChange={(s) => ctx.clock.setSpeed(s)}
-      />
+      <LiveStatusMetric status={status} />
+      {!backend && (
+        <ChoiceChips
+          testId="speed-chip"
+          label={t('control.speed')}
+          items={SPEEDS.map((s) => ({ value: s, text: `${s}×` }))}
+          selected={speed}
+          onChange={(s) => ctx.clock.setSpeed(s)}
+        />
+      )}
     </span>
   );
 }

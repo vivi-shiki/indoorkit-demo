@@ -4,17 +4,23 @@
  */
 import {
   type AlarmRecord,
+  dayStartOf,
   FRAME_FIELD,
   FRAMES_MAXLEN,
   HOSPITAL_ASSETS,
   HOSPITAL_TAGS,
   MONGO_DB,
   mongoCollections,
+  parseBookingReport,
+  parseDeviceReport,
   parseEventReport,
+  parseParkingEvent,
   parsePositionReport,
   parseTopic,
   redisKeys,
+  SITE_TIME_ZONE,
   SITES,
+  type Site,
   SOURCE_ONLINE,
   TELEMETRY_TTL_DAYS,
   topicFilter,
@@ -32,7 +38,9 @@ import { MongoClient, MongoServerError } from 'mongodb';
 import mqtt from 'mqtt';
 import { z } from 'zod';
 import { handleEvent } from './events';
-import { createHospitalAlarms, HOSPITAL_VENUE } from './hospital';
+import { createHospitalAlarms, HOSPITAL_VENUE } from './hospital/alarms';
+import { createParkingSite, type ParkingDayState } from './parking/site';
+import { PARKING } from './parking/venue';
 import { createIngestState, type Flush } from './state';
 
 const log = createLogger('ingest');
@@ -44,6 +52,8 @@ const config = loadConfig(
     HTTP_PORT: envNumber(8082),
     FLUSH_MS: envNumber(1000),
     OFFLINE_AFTER_MS: envNumber(10_000),
+    /** 固定的客户端 id 加持久会话：ingest 重启期间的 QoS 1 消息（停车事件）由 broker 暂存 */
+    MQTT_CLIENT_ID: z.string().min(1).default('ingest'),
   }),
   process.env,
 );
@@ -80,11 +90,37 @@ async function ensureCollections() {
 }
 
 // 告警 id 带上这次启动的时间，重启后不和库里的重复
+const idPrefix = Date.now().toString(36);
 const hospitalAlarms = createHospitalAlarms(HOSPITAL_VENUE, {
   people: HOSPITAL_TAGS,
   assets: HOSPITAL_ASSETS,
-  idPrefix: Date.now().toString(36),
+  idPrefix,
 });
+
+const DAY = 86_400_000;
+/**
+ * 停车场以当天 0 点为基准。启动和过了 0 点时都从 Redis 读回设备、预约和昨天以来的事件，
+ * 悄悄重放一遍，已经报过的告警不再报（R5-07）
+ */
+async function loadParking() {
+  const site = createParkingSite(PARKING, {
+    origin: dayStartOf(Date.now(), SITE_TIME_ZONE),
+    timeZone: SITE_TIME_ZONE,
+    idPrefix,
+  });
+  const saved = await redis.get(redisKeys.day('parking'));
+  if (saved) site.restore(JSON.parse(saved) as ParkingDayState);
+  for (const text of await redis.lrange(redisKeys.dayEvents('parking'), 0, -1)) {
+    const r = parseParkingEvent(text);
+    if (r.ok) site.event(r.value, { silent: true });
+  }
+  site.advance(Date.now(), { silent: true });
+  site.drain();
+  return { site, origin: dayStartOf(Date.now(), SITE_TIME_ZONE) };
+}
+let { site: parking, origin: parkingOrigin } = await loadParking();
+/** 新的停车事件：写进当天列表和 MongoDB（重复的由台账挡掉） */
+const parkingEvents: string[] = [];
 
 const eventStore = {
   claim: async (site: string, id: string) =>
@@ -100,7 +136,8 @@ const eventStore = {
 };
 
 const client = mqtt.connect(config.MQTT_URL, {
-  clientId: `ingest-${process.pid}-${Date.now()}`,
+  clientId: config.MQTT_CLIENT_ID,
+  clean: false,
   reconnectPeriod: 1000,
 });
 client.on('connect', () => {
@@ -109,6 +146,8 @@ client.on('connect', () => {
   client.subscribe([`$share/ingest/${topicFilter('pos')}`, topicFilter('source')], { qos: 0 });
   // 事件至少送达一次，重复的按 id 去掉
   client.subscribe(`$share/ingest/${topicFilter('event')}`, { qos: 1 });
+  // 设备状态和预约是保留消息，同样单独订阅（R5-01）
+  client.subscribe([topicFilter('dev', 'parking'), topicFilter('booking', 'parking')], { qos: 1 });
 });
 client.on('error', (err) => log('mqtt error', { error: err.message }));
 client.on('message', (topicText, payload) => {
@@ -121,6 +160,10 @@ client.on('message', (topicText, payload) => {
   const { site, kind, deviceId } = t.value;
   if (kind === 'source') {
     state.source(site, payload.toString() === SOURCE_ONLINE);
+    return;
+  }
+  if (site === 'parking' && kind !== 'pos') {
+    handleParking(kind, deviceId, payload);
     return;
   }
   if (kind === 'event') {
@@ -143,22 +186,60 @@ client.on('message', (topicText, payload) => {
   if (state.accept(site, deviceId, r.value, Date.now()) === 'stale') metrics.inc('stale_total');
 });
 
+function handleParking(kind: string, deviceId: string, payload: Buffer) {
+  if (kind === 'event') {
+    const r = parseParkingEvent(payload);
+    if (!r.ok) return void metrics.inc('invalid_total');
+    if (parking.event(r.value)) {
+      metrics.inc('events_total');
+      parkingEvents.push(JSON.stringify(r.value));
+      eventStore
+        .save({ ...r.value, site: 'parking' })
+        .catch((err: unknown) => log('event write failed', { error: String(err) }));
+    } else metrics.inc('events_duplicate_total');
+  } else if (kind === 'dev') {
+    const r = parseDeviceReport(payload);
+    if (!r.ok) return void metrics.inc('invalid_total');
+    parking.device(deviceId, r.value);
+  } else if (kind === 'booking') {
+    const r = parseBookingReport(payload);
+    if (!r.ok) return void metrics.inc('invalid_total');
+    parking.booking(r.value);
+  }
+}
+
+/** 停车场：检查到现在（留 2 秒给还在路上的消息），取走帧、告警和当天状态 */
+function drainParking(flushes: Flush[], now: number) {
+  parking.advance(now - 2000);
+  const { frames, alarms, day } = parking.drain();
+  if (frames.length > 0) {
+    let f = flushes.find((x) => x.site === 'parking');
+    if (!f) {
+      f = { site: 'parking', frames: [], state: {}, offlineAdd: [], offlineRemove: [], removed: [] };
+      flushes.push(f);
+    }
+    // 场景事件和告警排在这一轮的位置之前，时间顺序更接近
+    f.frames.unshift(...frames);
+  }
+  return { alarms: alarms.map((a) => ({ ...a, site: 'parking' as Site })), day };
+}
+
 /** 医院的位置交给告警引擎，新告警作为帧跟在位置后面（R4-05） */
-function addAlarms(flushes: Flush[]): AlarmRecord[] {
-  const raised: AlarmRecord[] = [];
+function addAlarms(flushes: Flush[]): (AlarmRecord & { site: Site })[] {
+  const raised: (AlarmRecord & { site: Site })[] = [];
   for (const f of flushes) {
     if (f.site !== 'hospital') continue;
     const positions = f.frames.find((x) => x.type === 'positions');
     if (positions?.type !== 'positions') continue;
     for (const alarm of hospitalAlarms.check({ time: positions.time, positions: positions.positions })) {
       f.frames.push({ type: 'alarm', site: f.site, time: positions.time, alarm });
-      raised.push(alarm);
+      raised.push({ ...alarm, site: f.site });
     }
   }
   return raised;
 }
 
-async function writeHistory(flushes: Flush[], raised: AlarmRecord[]) {
+async function writeHistory(flushes: Flush[], raised: (AlarmRecord & { site: Site })[]) {
   const docs = flushes.flatMap((f) => {
     const positions = f.frames.find((x) => x.type === 'positions');
     if (positions?.type !== 'positions') return [];
@@ -172,19 +253,37 @@ async function writeHistory(flushes: Flush[], raised: AlarmRecord[]) {
     }));
   });
   if (docs.length > 0) await telemetry.insertMany(docs, { ordered: false });
-  if (raised.length > 0) await alarmsCollection.insertMany(raised.map((a) => ({ ...a, site: 'hospital' })));
+  if (raised.length > 0) await alarmsCollection.insertMany(raised.map((a) => ({ ...a })));
   metrics.inc('telemetry_total', docs.length);
   metrics.inc('alarms_total', raised.length);
 }
 
-async function write(flushes: Flush[]) {
-  if (flushes.length === 0) return;
-  const raised = addAlarms(flushes);
+/** 过了 0 点：这一轮的事件已经写进 Redis，以新的一天为基准重建停车场 */
+async function rollover(now: number) {
+  if (dayStartOf(now, SITE_TIME_ZONE) === parkingOrigin) return;
+  const next = await loadParking();
+  // 重建期间到的事件还在缓冲里，没进 Redis，也给新的一天
+  for (const text of parkingEvents) {
+    const r = parseParkingEvent(text);
+    if (r.ok) next.site.event(r.value, { silent: true });
+  }
+  ({ site: parking, origin: parkingOrigin } = next);
+  log('parking day rolled over', { origin: parkingOrigin });
+}
+
+async function write(flushes: Flush[], now: number) {
+  const fromParking = drainParking(flushes, now);
+  const events = parkingEvents.splice(0);
+  if (flushes.length === 0 && events.length === 0 && !fromParking.day) return rollover(now);
+  const raised = [...addAlarms(flushes), ...fromParking.alarms];
   const p = redis.multi();
-  for (const a of raised) p.hset(redisKeys.openAlarms('hospital'), a.id, JSON.stringify(a));
+  for (const { site, ...a } of raised) p.hset(redisKeys.openAlarms(site), a.id, JSON.stringify(a));
+  if (events.length > 0) p.rpush(redisKeys.dayEvents('parking'), ...events);
+  if (fromParking.day) p.set(redisKeys.day('parking'), JSON.stringify(fromParking.day));
   for (const f of flushes) {
     const entries = Object.entries(f.state).map(([id, tag]) => [id, JSON.stringify(tag)] as const);
     if (entries.length > 0) p.hset(redisKeys.state(f.site), Object.fromEntries(entries));
+    if (f.removed.length > 0) p.hdel(redisKeys.state(f.site), ...f.removed);
     if (f.offlineAdd.length > 0) p.sadd(redisKeys.offline(f.site), ...f.offlineAdd);
     if (f.offlineRemove.length > 0) p.srem(redisKeys.offline(f.site), ...f.offlineRemove);
     if (f.source !== undefined) p.set(redisKeys.source(f.site), f.source ? 'online' : 'offline');
@@ -194,6 +293,7 @@ async function write(flushes: Flush[]) {
     metrics.inc('frames_total', f.frames.length);
   }
   await p.exec();
+  await rollover(now);
   // 历史晚一点写也没关系，不挡住实时帧
   writeHistory(flushes, raised).catch((err: unknown) => {
     metrics.inc('history_errors_total');
@@ -203,15 +303,30 @@ async function write(flushes: Flush[]) {
 
 let writing = Promise.resolve();
 const flushTimer = setInterval(() => {
-  const flushes = state.flush(Date.now());
+  const now = Date.now();
+  const flushes = state.flush(now);
   // 上一次还没写完就排在它后面，保证帧的顺序
   writing = writing
-    .then(() => write(flushes))
+    .then(() => write(flushes, now))
     .catch((err: unknown) => {
       metrics.inc('write_errors_total');
       log('redis write failed', { error: String(err) });
     });
 }, config.FLUSH_MS);
+
+/** 当天事件列表只留昨天 0 点以后的（R5-07） */
+async function trimDayEvents() {
+  const cutoff = dayStartOf(Date.now(), SITE_TIME_ZONE) - DAY;
+  const key = redisKeys.dayEvents('parking');
+  for (;;) {
+    const head = await redis.lindex(key, 0);
+    if (!head || (JSON.parse(head) as { ts: number }).ts >= cutoff) return;
+    await redis.lpop(key);
+  }
+}
+const trimTimer = setInterval(() => {
+  trimDayEvents().catch((err: unknown) => log('trim failed', { error: String(err) }));
+}, 60_000);
 
 const http = await startHttp({
   port: config.HTTP_PORT,
@@ -236,9 +351,10 @@ onShutdown(async () => {
   await http.close();
   await client.endAsync();
   clearInterval(flushTimer);
+  clearInterval(trimTimer);
   // 把最后一轮也写进去
   await writing;
-  await write(state.flush(Date.now()));
+  await write(state.flush(Date.now()), Date.now());
   await redis.quit();
   await mongo.close();
 }, log);
